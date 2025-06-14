@@ -12,6 +12,7 @@
 本项目致力于解决FlStudio的完整.mid文件导出功能残缺问题(无法带乐器分乐轨,批量分pattern输出)
 注意❗本项目与[FlStudio](https://www.image-line.com/fl-studio/)和[FlpInfo](https://github.com/demberto/FLPInfo)无关(后者同样依靠PyFlp库,但已停止更新),所有代码均为原创/AI生成后人工修改或重写
 
+
 ## 本项目遵循GPL-3.0 license
 
 本项目使用 GPL-3.0 license 授权，允许自由使用、修改与分发
@@ -29,7 +30,9 @@
 GIthub账号:Renzic-Stone
 邮箱:rzs_@outlook.com
 
-##联系作者
+
+
+## 联系作者
 如果遇到任何问题,欢迎通过GitHub/邮件联系作者
 - 作者：Renzic-Stone
 - 联系方式：rzs_@outlook.com
