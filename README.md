@@ -10,24 +10,23 @@
 音符位置说明: 小节(1开始):步(00-15,十六进制):嘀嗒(00-23,24进制),(与FlStudio钢琴卷帘内部标记一致)
 ..............
 本项目致力于解决FlStudio的完整.mid文件导出功能残缺问题(无法带乐器分乐轨,批量分pattern输出)
-注意❗本项目与[FlStudio](https://www.image-line.com/fl-studio/)和[FlpInfo](https://github.com/demberto/FLPInfo)无关(后者同样依靠PyFlp库,但已停止更新),所有代码均为原创/AI生成后人工修改,优化
+注意❗本项目与[FlStudio](https://www.image-line.com/fl-studio/)和[FlpInfo](https://github.com/demberto/FLPInfo)无关(后者同样依靠PyFlp库,但已停止更新),所有代码均为原创/AI生成后人工修改或重写
 ..............
-## 本项目遵循Apache License 2.0 
-AI 协助说明
+## 本项目遵循GPL-3.0 license
+
+### AI 协助说明(About AI)
 
 本项目部分代码由 生成式AI 辅助生成（如chatGPT等），所有内容已由作者本人整理、验证与修改。
 
-本项目代码版权归作者所有，允许在 Apache License 2.0 下非商业使用。
+本项目代码版权归作者所有，允许在 GPL-3.0 license 下使用。
 
-## 商业授权声明（Commercial Use Policy）
+### 使用授权声明（Use Policy）
 
-本项目使用 Apache License 2.0 授权，允许自由使用、修改与分发，**仅限于非商业用途**。
+本项目使用 GPL-3.0 license 授权，允许自由使用、修改与分发
 
-若您希望将本项目或其修改版本用于任何商业目的（包括但不限于作为产品的一部分、提供付费服务、公司内部使用等），请联系作者获取商业授权：
+如果遇到任何问题,欢迎通过GitHub/邮件联系作者
 
 - 作者：Renzic-Stone
 - 联系方式：rzs_@outlook.com
-
-未经商业授权的商用行为将被视为侵权，保留追究法律责任的权利。
 
 ..............
