@@ -1,5 +1,5 @@
 # FlpInfoer
-([If you are an English user... Click see here](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md))
+([If you need an English README... Click here](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md))
 
 这是一个基于Python3.10和[PyFlp](https://github.com/demberto/PyFLP)V2.2.1的用于读取生成于[FlStudio](https://www.image-line.com/fl-studio/)的特殊格式工程文件.flp文件的第三方项目
 ### 目前已经实现的功能有:
