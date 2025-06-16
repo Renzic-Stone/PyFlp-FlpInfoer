@@ -5,9 +5,9 @@
 
 2.按Pattern分文件导出音符✅
 
-3.导出速度: 148.0 BPM ✅
+3.导出速度(BPM) ✅
 ### 未来将会支持:
-1/按Pattern分别导出.mid文件❌
+1.按Pattern分别导出.mid文件❌
 
 2.按音轨导出Pattem❌
 
