@@ -257,7 +257,7 @@ def export_track_sequences(flp_path, track_seqs, ppq):
         f.write(f"# FL Studio Track Sequence Analysis {VERSION}\n")
         f.write(f"# File: {os.path.basename(flp_path)}\n")
         f.write(f"# Found {len(track_seqs)} track(s) with patterns\n\n")
-        for tid, td in track_seqs.items():
+        for tid, td in sorted(track_seqs.items(), key=lambda x: x[0]):
             f.write(f"### Track: {td['name']}\n")
             for ev in td["events"]:
                 s = calculate_fl_position(ev["start"], ppq)
@@ -376,7 +376,7 @@ def export_track_midi(raw_patterns, track_seqs, tempo, ppq, flp_path):
     for pname, notes in raw_patterns.items():
         pnotes[pname] = notes
 
-    for tid, td in track_seqs.items():
+    for tid, td in sorted(track_seqs.items(), key=lambda x: x[0]):
         mid = MidiFile(ticks_per_beat=ppq)
         t0 = MidiTrack()
         mid.tracks.append(t0)
