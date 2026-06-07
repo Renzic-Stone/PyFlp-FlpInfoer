@@ -1,5 +1,5 @@
 # FlpInfoer
-([English README](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md) / [中文说明](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README.md))
+([English](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md) / [中文](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README.md))
 
 Python 3.10 と [PyFlp](https://github.com/demberto/PyFLP) v2.2.1 + [mido](https://github.com/mido/mido) を使用して FL Studio の .flp プロジェクトファイルを解析・MIDI 出力するサードパーティーツールです。
 
