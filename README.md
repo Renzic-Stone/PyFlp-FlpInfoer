@@ -1,5 +1,5 @@
 # FlpInfoer
-([If you need an English README... Click here](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md))
+([English](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md) / [日本語](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_jp.md))
 
 这是一个基于Python3.10和[PyFlp](https://github.com/demberto/PyFLP)V2.2.1，使用[mido](https://github.com/mido/mido)导出MIDI的第三方.flp工程文件解析工具
 

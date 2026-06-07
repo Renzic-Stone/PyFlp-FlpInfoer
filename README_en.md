@@ -1,4 +1,6 @@
 # FlpInfoer
+([中文](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README.md) / [日本語](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_jp.md))
+
 A Python 3.10-based tool using [PyFlp](https://github.com/demberto/PyFLP) v2.2.1 + [mido](https://github.com/mido/mido) to parse & export FL Studio project files (.flp) to MIDI.
 
 ### Current Features
