@@ -485,7 +485,10 @@ def main():
 
     extract_flp_notes(flp_path)
     print("\nPress Enter to exit...")
-    input()
+    try:
+        input()
+    except (EOFError, OSError):
+        pass
 
 
 if __name__ == "__main__":
