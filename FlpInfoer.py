@@ -1,466 +1,492 @@
+"""FlpInfoer -- FL Studio .flp MIDI extraction tool
+Python 3.10 + PyFlp 2.2.1 + mido
+"""
+
+import io
 import os
+import re
 import sys
 import time
 import traceback
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
+
 from pyflp import parse
 from pyflp.arrangement import PlaylistEvent
 
-VERSION = "V0.2.0"
+VERSION = "V0.3.0"
+
+
+def _fix_stdout():
+    """Ensure stdout uses utf-8 on Windows."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    else:
+        try:
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.buffer, encoding="utf-8", errors="replace"
+            )
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Utility
+# ---------------------------------------------------------------------------
 
 def calculate_fl_position(position, ppq):
-    """将位置值转换为FL Studio格式的小节:步:嘀嗒"""
+    """Convert ticks to FL format bar:step:tick"""
     if not isinstance(position, (int, float)):
         try:
             position = int(position) if position else 0
-        except:
+        except Exception:
             position = 0
-    
-    ticks_per_bar = ppq * 4
-    bar = position // ticks_per_bar + 1
-    ticks_in_bar = position % ticks_per_bar
-    step = ticks_in_bar // 24
-    tick = ticks_in_bar % 24
-    
+    tpb = ppq * 4
+    bar = position // tpb + 1
+    rem = position % tpb
+    step = rem // 24
+    tick = rem % 24
     return f"{bar}:{step:02d}:{tick:02d}"
 
+
 def get_pitch_name(pitch_value):
-    """将音高值转换为音高名称，处理整数和字符串两种情况"""
+    """MIDI note number -> note name"""
     if isinstance(pitch_value, int):
-        # MIDI 音符编号处理
         notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
         octave = (pitch_value // 12) - 1
-        note_index = pitch_value % 12
-        return f"{notes[note_index]}{octave}"
-    elif isinstance(pitch_value, str):
-        # 直接返回字符串值
+        return f"{notes[pitch_value % 12]}{octave}"
+    if isinstance(pitch_value, str):
         return pitch_value
-    else:
-        # 其他类型尝试转换
-        try:
-            return str(pitch_value)
-        except:
-            return "C5"  # 默认值
-
-def process_note_item(item, ppq, channel_map):
-    """处理单个音符项"""
     try:
-        position = getattr(item, 'position', 0)
-        if not isinstance(position, (int, float)):
-            try:
-                position = int(position) if position else 0
-            except:
-                position = 0
-        
-        # 直接获取音高值
-        pitch_value = getattr(item, 'key', 60)
-        pitch_name = get_pitch_name(pitch_value)
-        
-        # 获取duration
-        duration = 0
-        if hasattr(item, 'duration') and item.duration is not None:
-            duration = item.duration
-        elif hasattr(item, 'length') and item.length is not None:
-            duration = item.length
-        
-        if not isinstance(duration, (int, float)):
-            try:
-                duration = int(duration) if duration else 1
-            except:
-                duration = 1
-        duration = max(1, duration)  # 确保至少1 tick
-        
-        channel_id = getattr(item, 'rack_channel', getattr(item, 'channel', -1))
-        if not isinstance(channel_id, int):
-            try:
-                channel_id = int(channel_id)
-            except:
-                channel_id = -1
-        
-        # 修正轨道索引显示：索引0 → 轨道1
-        display_channel_index = channel_id + 1
-        channel_name = channel_map.get(channel_id, f"轨道{display_channel_index}")
-        
-        start_pos = calculate_fl_position(position, ppq)
-        end_pos = calculate_fl_position(position + duration, ppq)
-        
-        return f"[{start_pos}-{end_pos},{pitch_name},{channel_name}] 持续={duration}ticks"
-    
-    except Exception as e:
-        # 提供详细的错误信息
-        error_info = f"处理音符出错: {str(e)}"
-        try:
-            # 获取音符详细信息用于调试
-            item_info = f"位置: {position}, 音高: {pitch_value}, 时长: {duration}"
-            error_info += f" | {item_info}"
-        except:
-            pass
-        print(error_info)
-        return None
+        return str(pitch_value)
+    except Exception:
+        return "C5"
+
+
+def _safe_int(value, default=0):
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+# ---------------------------------------------------------------------------
+# Parse
+# ---------------------------------------------------------------------------
 
 def create_channel_map(project):
-    """创建通道ID到名称的映射"""
-    channel_map = {}
+    cmap = {}
     try:
-        for i, channel in enumerate(project.channels):
+        for i, ch in enumerate(project.channels):
             try:
-                channel_id = getattr(channel, 'id', i)
-                # 修正轨道索引显示：索引0 → 轨道1
-                display_channel_index = i + 1
-                channel_name = getattr(channel, 'name', f"轨道{display_channel_index}")
-                channel_map[channel_id] = channel_name
-            except:
-                # 修正轨道索引显示：索引0 → 轨道1
-                display_channel_index = i + 1
-                channel_map[i] = f"轨道{display_channel_index}"
+                cid = getattr(ch, "id", i)
+                cname = getattr(ch, "name", f"Track{i + 1}")
+                cmap[cid] = cname
+            except Exception:
+                cmap[i] = f"Track{i + 1}"
     except Exception as e:
-        print(f"创建通道映射失败: {str(e)}")
-    return channel_map
+        print(f"Channel map failed: {e}")
+    return cmap
 
-def analyze_patterns(project, channel_map):
-    """分析工程中的所有模式，提取音符数据"""
-    try:
-        tempo = project.tempo
-        ppq = project.ppq
-        patterns = project.patterns
-        
-        all_notes = []
-        pattern_notes = defaultdict(list)
-        total_notes = 0
-        
-        if not patterns:
-            return all_notes, pattern_notes, tempo, ppq
-        
-        for i, pattern in enumerate(patterns):
+
+def _consume_pattern_notes(project, channel_map):
+    """Extract raw note data from all patterns.
+    Returns: (tempo, ppq, {pname: [(pos,key,dur,ch_id,ch_name),...]}, total_count)
+    """
+    tempo = getattr(project, "tempo", 120.0)
+    ppq = getattr(project, "ppq", 96)
+    raw = OrderedDict()
+    total = 0
+
+    for i, pat in enumerate(project.patterns):
+        name = getattr(pat, "name", f"Pattern_{i + 1}")
+        notes_out = []
+        raw_notes = list(getattr(pat, "notes", []))  # BUGFIX: generator -> list
+        for note in raw_notes:
             try:
-                pattern_name = getattr(pattern, 'name', f"Pattern_{i+1}")
-                pattern_note_count = 0
-                
-                if hasattr(pattern, 'notes') and pattern.notes:
-                    for note in pattern.notes:
-                        note_record = process_note_item(note, ppq, channel_map)
-                        if note_record:
-                            all_notes.append(note_record)
-                            pattern_notes[pattern_name].append(note_record)
-                            pattern_note_count += 1
-                
-                total_notes += pattern_note_count
+                pos = _safe_int(getattr(note, "position", 0))
+                key = getattr(note, "key", 60)
+                dur = _safe_int(
+                    getattr(note, "duration", getattr(note, "length", 0)), 0
+                )
+                if dur <= 0:
+                    dur = ppq // 4  # default 1/16
+                ch = _safe_int(
+                    getattr(note, "rack_channel", getattr(note, "channel", -1)), -1
+                )
+                ch_name = channel_map.get(ch, f"Track{ch + 1}")
+                notes_out.append((pos, key, dur, ch, ch_name))
             except Exception as e:
-                print(f"分析Pattern {i}失败: {str(e)}")
-        
-        return all_notes, pattern_notes, tempo, ppq
-    except Exception as e:
-        print(f"分析Patterns失败: {str(e)}")
-        return [], defaultdict(list), 120, 96  # 返回默认值
+                print(f"  Skip bad note: {e}")
+        raw[name] = notes_out
+        total += len(notes_out)
 
-def export_results(flp_path, all_notes, pattern_notes, tempo, ppq):
-    """导出所有分析结果"""
-    if not all_notes:
-        print("没有找到音符，跳过导出")
+    return tempo, ppq, raw, total
+
+
+def parse_playlist(project, pattern_index_by_name):
+    """Parse playlist -> track sequences.
+    Returns: {track_id: {"name": str, "events": [{pattern_name,start,length,end}]}}
+    """
+    track_seqs = OrderedDict()
+
+    if not hasattr(project, "arrangements") or not project.arrangements:
+        return track_seqs
+
+    arr = project.arrangements[0]
+
+    # Find PlaylistEvent in events
+    ple = None
+    for ev in getattr(arr, "events", []):
+        if isinstance(ev, PlaylistEvent):
+            ple = ev
+            break
+    if ple is None:
+        ple = getattr(arr, "playlist", None)
+
+    if ple is None or not hasattr(ple, "__len__"):
+        return track_seqs
+
+    items = list(ple)
+    print(f"  Playlist items: {len(items)}")
+
+    track_cursor = {}
+    patterns_list = project.patterns  # for resolving FL ID -> name
+
+    for item in items:
+        raw_track = getattr(item, "track_index", None) or getattr(item, "track", None)
+        rvidx = getattr(item, "track_rvidx", None)
+        if raw_track is None and rvidx is not None and rvidx >= 0:
+            raw_track = 500 - rvidx
+        if raw_track is None:
+            raw_track = 0
+
+        length = _safe_int(getattr(item, "length", 384), 384)
+        start = getattr(item, "start", None)
+        if start is None:
+            start = track_cursor.get(raw_track, 0)
+        else:
+            start = _safe_int(start)
+
+        # Resolve pattern name
+        pat_obj = getattr(item, "pattern", None)
+        if pat_obj is not None:
+            pname = getattr(pat_obj, "name", None)
+        else:
+            pname = None
+
+        if pname is None:
+            iidx = _safe_int(getattr(item, "item_index", 0), -1)
+            pbase = _safe_int(getattr(item, "pattern_base", 0), 0)
+            flpid = iidx - pbase - 1  # convert to 0-based pattern list index
+            if 0 <= flpid < len(patterns_list):
+                pname = getattr(patterns_list[flpid], "name", f"Pattern_{flpid + 1}")
+            else:
+                pname = f"Pattern_{iidx - pbase}"
+
+        if raw_track not in track_seqs:
+            track_seqs[raw_track] = {"name": f"Track{raw_track}", "events": []}
+
+        track_seqs[raw_track]["events"].append({
+            "pattern_name": pname,
+            "start": start,
+            "length": length,
+            "end": start + length,
+        })
+        track_cursor[raw_track] = start + length
+
+    return track_seqs
+
+
+# ---------------------------------------------------------------------------
+# Text export
+# ---------------------------------------------------------------------------
+
+def export_results(flp_path, raw_patterns, tempo, ppq):
+    if not raw_patterns:
+        print("No notes found, skip text export.")
         return
-    
-    try:
-        base_name = os.path.splitext(os.path.basename(flp_path))[0]
-        
-        # 导出完整音符
-        full_path = f"{base_name}_all_notes.txt"
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(f"# FL Studio音符提取工具 {VERSION}\n")
-            f.write(f"# 文件: {os.path.basename(flp_path)}\n")
-            f.write(f"# 速度: {tempo} BPM\n")
-            f.write(f"# PPQ分辨率: {ppq}\n")
-            f.write("# 格式: [开始小节:步:嘀嗒-结束小节:步:嘀嗒,音高,轨道] (持续=ticks)\n")
-            f.write("# 位置说明: 小节(1开始):步(00-15):嘀嗒(00-23)\n\n")
-            
-            for pattern_name, notes in pattern_notes.items():
-                if notes:
-                    f.write(f"\n{'=' * 80}\n")
-                    f.write(f"# Pattern: {pattern_name}\n")
-                    f.write(f"{'=' * 80}\n\n")
-                    f.write("\n".join(notes))
-                    f.write("\n")
-        
-        print(f"✓ 所有音符导出至: {full_path}")
-        
-        # 按Pattern导出
-        pattern_dir = f"{base_name}_patterns"
-        os.makedirs(pattern_dir, exist_ok=True)
-        
-        for pattern_name, notes in pattern_notes.items():
-            if not notes:
-                continue
-                
-            safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in pattern_name)
-            pattern_path = os.path.join(pattern_dir, f"{safe_name}.txt")
-            
-            with open(pattern_path, "w", encoding="utf-8") as f:
-                f.write(f"# Pattern: {pattern_name}\n")
-                f.write("\n".join(notes))
-            
-            print(f"✓ Pattern {pattern_name} 导出至: {pattern_path}")
-            
-    except Exception as e:
-        print(f"导出结果失败: {str(e)}")
 
-def create_pattern_mapping(project):
-    """创建Pattern ID到名称的映射"""
-    pattern_mapping = {}
-    try:
-        for i, pattern in enumerate(project.patterns):
-            try:
-                pattern_id = i
-                pattern_name = getattr(pattern, 'name', f"Pattern_{pattern_id+1}")
-                pattern_mapping[pattern_id] = pattern_name
-            except Exception as e:
-                print(f"映射Pattern失败: {str(e)}")
-                pattern_mapping[i] = f"Pattern_{i+1}"
-    except Exception as e:
-        print(f"创建Pattern映射失败: {str(e)}")
-    
-    # 默认映射
-    for i in range(0, 200):
-        if i not in pattern_mapping:
-            pattern_mapping[i] = f"Pattern_{i+1}"
-    
-    return pattern_mapping
+    base = os.path.splitext(os.path.basename(flp_path))[0]
 
-def parse_playlist(project, pattern_mapping):
-    """解析播放列表，修复轨道索引和位置问题"""
-    try:
-        print("\n===== 解析播放列表 =====")
-        
-        # 检查编排是否存在
-        if not hasattr(project, 'arrangements') or not project.arrangements:
-            print("工程中没有编排信息")
-            return OrderedDict()
-        
-        arrangement = project.arrangements[0]
-        print(f"找到编排: {type(arrangement)}")
-        
-        # 尝试获取播放列表事件
-        playlist_events = []
-        
-        # 方式1: 直接访问playlist属性
-        if hasattr(arrangement, 'playlist'):
-            try:
-                playlist_events = arrangement.playlist
-                print(f"通过属性找到 {len(playlist_events)} 个播放列表事件")
-            except:
-                pass
-        
-        # 方式2: 从事件树中查找
-        if not playlist_events and hasattr(arrangement, 'events'):
-            try:
-                for event in arrangement.events:
-                    if isinstance(event, PlaylistEvent):
-                        playlist_events = event
-                        print(f"通过事件找到播放列表事件: {type(event)}")
-                        break
-            except:
-                pass
-        
-        if not playlist_events:
-            print("未找到播放列表事件")
-            return OrderedDict()
-        
-        # 处理播放列表事件
-        track_patterns = OrderedDict()
-        
-        # 如果是PlaylistEvent实例
-        if isinstance(playlist_events, PlaylistEvent):
-            print(f"处理播放列表事件: 共 {len(playlist_events)} 个项目")
-            
-            # 创建原始轨道ID到修正轨道ID的映射
-            track_id_mapping = {}
-            
-            for event in playlist_events:
-                try:
-                    # 使用安全方式获取属性
-                    start = getattr(event, 'start', 0)
-                    length = getattr(event, 'length', 0)
-                    end = start + length
-                    
-                    # 获取原始轨道索引
-                    raw_track_index = -1
-                    
-                    if hasattr(event, 'track_index'):
-                        raw_track_index = getattr(event, 'track_index', -1)
-                    
-                    if raw_track_index < 0 and hasattr(event, 'track_rvidx'):
-                        track_rvidx = getattr(event, 'track_rvidx', -1)
-                        if track_rvidx >= 0:
-                            raw_track_index = 500 - track_rvidx
-                    
-                    if raw_track_index < 0 and hasattr(event, 'track'):
-                        raw_track_index = getattr(event, 'track', -1)
-                    
-                    # 关键修复：创建轨道索引映射
-                    if raw_track_index >= 0:
-                        # 为每个原始轨道ID创建唯一的修正轨道ID
-                        if raw_track_index not in track_id_mapping:
-                            track_id_mapping[raw_track_index] = len(track_id_mapping)
-                        
-                        track_index = track_id_mapping[raw_track_index]
-                        
-                        # 获取Pattern信息
-                        pattern = getattr(event, 'pattern', None)
-                        pattern_id = -1
-                        
-                        if pattern:
-                            try:
-                                pattern_id = project.patterns.index(pattern)
-                                pattern_id = max(0, pattern_id - 1)
-                            except:
-                                pass
-                            pattern_name = pattern_mapping.get(pattern_id, f"Pattern_{pattern_id}")
-                        else:
-                            item_index = getattr(event, 'item_index', -1)
-                            pattern_base = getattr(event, 'pattern_base', 0)
-                            pattern_id = item_index - pattern_base
-                            pattern_id = max(0, pattern_id - 1)
-                            pattern_name = pattern_mapping.get(pattern_id, f"Pattern_{pattern_id}")
-                        
-                        if track_index not in track_patterns:
-                            # 修正轨道索引显示：索引0 → 轨道0
-                            track_patterns[track_index] = {
-                                'name': f"轨道{track_index}",
-                                'events': []
-                            }
-                        
-                        track_patterns[track_index]['events'].append({
-                            'pattern_id': pattern_id,
-                            'pattern_name': pattern_name,
-                            'start': start,
-                            'end': end,
-                            'length': length
-                        })
-                        
-                        # 调试信息
-                        print(f"轨道{track_index}: Pattern {pattern_name} 位置={start}-{end}")
-                    else:
-                        print(f"跳过无效轨道索引的事件: Pattern {pattern_name}")
-                except Exception as e:
-                    print(f"处理播放列表事件出错: {str(e)}")
-                    traceback.print_exc()
-        
-        print(f"找到 {len(track_patterns)} 条包含Pattern的音轨")
-        return track_patterns
-    
-    except Exception as e:
-        print(f"解析播放列表失败: {str(e)}")
-        traceback.print_exc()
-        return OrderedDict()
+    all_path = f"{base}_all_notes.txt"
+    with open(all_path, "w", encoding="utf-8") as f:
+        f.write(f"# FL Studio Note Extraction Tool {VERSION}\n")
+        f.write(f"# File: {os.path.basename(flp_path)}\n")
+        f.write(f"# Tempo: {tempo} BPM\n")
+        f.write(f"# PPQ: {ppq}\n")
+        f.write("# Format: [start-end,pitch,instrument] (duration=ticks)\n\n")
 
-def export_track_sequences(flp_path, track_patterns, ppq):
-    """导出音轨序列，修复位置问题"""
-    if not track_patterns:
-        print("没有找到音轨序列数据，跳过导出")
+        for pname, notes in raw_patterns.items():
+            f.write(f"\n{'=' * 80}\n# Pattern: {pname}\n{'=' * 80}\n\n")
+            for pos, key, dur, ch, ch_name in notes:
+                s = calculate_fl_position(pos, ppq)
+                e = calculate_fl_position(pos + dur, ppq)
+                pn = get_pitch_name(key)
+                f.write(f"[{s}-{e},{pn},{ch_name}] dur={dur}ticks\n")
+
+    print(f"[OK] All notes -> {all_path}")
+
+    pdir = f"{base}_patterns"
+    os.makedirs(pdir, exist_ok=True)
+    for pname, notes in raw_patterns.items():
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in pname)
+        pp = os.path.join(pdir, f"{safe}.txt")
+        with open(pp, "w", encoding="utf-8") as f:
+            f.write(f"# Pattern: {pname}\n")
+            for pos, key, dur, ch, ch_name in notes:
+                s = calculate_fl_position(pos, ppq)
+                e = calculate_fl_position(pos + dur, ppq)
+                pn = get_pitch_name(key)
+                f.write(f"[{s}-{e},{pn},{ch_name}] dur={dur}ticks\n")
+        print(f"[OK] Pattern {pname} -> {pp}")
+
+
+def export_track_sequences(flp_path, track_seqs, ppq):
+    if not track_seqs:
         return
-    
+    base = os.path.splitext(os.path.basename(flp_path))[0]
+    path = f"{base}_track_sequences.txt"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"# FL Studio Track Sequence Analysis {VERSION}\n")
+        f.write(f"# File: {os.path.basename(flp_path)}\n")
+        f.write(f"# Found {len(track_seqs)} track(s) with patterns\n\n")
+        for tid, td in track_seqs.items():
+            f.write(f"### Track: {td['name']}\n")
+            for ev in td["events"]:
+                s = calculate_fl_position(ev["start"], ppq)
+                e = calculate_fl_position(ev["end"], ppq)
+                f.write(f"[{s}-{e}] {ev['pattern_name']} (dur={ev['length']}ticks)\n")
+            f.write("\n")
+    print(f"[OK] Track sequences -> {path}")
+
+
+# ---------------------------------------------------------------------------
+# MIDI export
+# ---------------------------------------------------------------------------
+
+_NOTE_MAP = {
+    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
+    "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
+    "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
+}
+
+
+def _midi_note_number(key):
+    """Convert key (int or 'C5' string) to MIDI note number 0-127."""
+    if isinstance(key, int):
+        return max(0, min(127, key))
+    key = str(key).strip()
+    m = re.match(r"^([A-Ga-g]#?|[A-Ga-g]b)\s*(-?\d+)?$", key)
+    if m:
+        note = m.group(1).capitalize()
+        octave = int(m.group(2)) if m.group(2) else 5
+        base = _NOTE_MAP.get(note, 0)
+        return max(0, min(127, (octave + 1) * 12 + base))
+    # fallback: try int
     try:
-        base_name = os.path.splitext(os.path.basename(flp_path))[0]
-        sequences_path = f"{base_name}_track_sequences.txt"
-        
-        with open(sequences_path, "w", encoding="utf-8") as f:
-            f.write(f"# FL Studio音轨Pattern序列分析 {VERSION}\n")
-            f.write(f"# 文件: {os.path.basename(flp_path)}\n")
-            f.write(f"# 找到 {len(track_patterns)} 条包含Pattern的音轨\n\n")
-            
-            for track_idx, track_data in track_patterns.items():
-                f.write(f"### 音轨: {track_data['name']}\n")
-                
-                for event in track_data['events']:
-                    start_pos = calculate_fl_position(event['start'], ppq)
-                    end_pos = calculate_fl_position(event['end'], ppq)
-                    
-                    f.write(f"[{start_pos}-{end_pos}] {event['pattern_name']} ")
-                    f.write(f"(持续={event['length']}ticks)\n")
-                
-                f.write("\n")
-        
-        print(f"✓ 音轨序列导出至: {sequences_path}")
-    except Exception as e:
-        print(f"导出音轨序列失败: {str(e)}")
+        return max(0, min(127, int(key)))
+    except Exception:
+        return 60
+
+
+def _write_midi_track(mid, ch_id, ch_name, notes, ppq, tempo, midi_channel):
+    """Append a MIDI track to mid (MidiFile) with given notes.
+    notes: [(tick, key, dur), ...]
+    midi_channel: 0-15 MIDI channel number
+    """
+    from mido import Message, MetaMessage, MidiTrack
+
+    track = MidiTrack()
+    track.append(MetaMessage("track_name", name=ch_name, time=0))
+
+    # Sort by time, then note-off before note-on at same position
+    events = []
+    for pos, key, dur in notes:
+        nn = _midi_note_number(key)
+        vel = 100
+        events.append((pos, "note_on", nn, vel))
+        events.append((pos + dur, "note_off", nn, 0))
+    events.sort(key=lambda x: (x[0], 0 if x[1] == "note_off" else 1))
+
+    last_tick = 0
+    for tick, etype, nn, vel in events:
+        delta = tick - last_tick
+        if delta < 0:
+            delta = 0
+        if etype == "note_on":
+            track.append(Message("note_on", channel=midi_channel, note=nn, velocity=vel, time=delta))
+        else:
+            track.append(Message("note_off", channel=midi_channel, note=nn, velocity=0, time=delta))
+        last_tick = tick
+
+    mid.tracks.append(track)
+
+
+def export_pattern_midi(raw_patterns, tempo, ppq, flp_path):
+    """One .mid per pattern."""
+    from mido import MidiFile, MidiTrack, MetaMessage
+
+    base = os.path.splitext(os.path.basename(flp_path))[0]
+    mdir = f"{base}_midi_patterns"
+    os.makedirs(mdir, exist_ok=True)
+
+    for pname, notes in raw_patterns.items():
+        if not notes:
+            continue
+        mid = MidiFile(ticks_per_beat=ppq)
+        t0 = MidiTrack()
+        mid.tracks.append(t0)
+        t0.append(MetaMessage("set_tempo", tempo=int(60_000_000 / tempo), time=0))
+
+        # Group by channel
+        ch_groups = OrderedDict()
+        for pos, key, dur, ch_id, ch_name in notes:
+            if ch_id not in ch_groups:
+                ch_groups[ch_id] = {"name": ch_name, "notes": []}
+            ch_groups[ch_id]["notes"].append((pos, key, dur))
+
+        for idx, (ch_id, ch_data) in enumerate(ch_groups.items()):
+            _write_midi_track(mid, ch_id, ch_data["name"], ch_data["notes"], ppq, tempo, idx % 16)
+
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in pname)
+        mpath = os.path.join(mdir, f"{safe}.mid")
+        mid.save(mpath)
+        print(f"[OK] Pattern MIDI {pname} -> {mpath}")
+
+
+def export_track_midi(raw_patterns, track_seqs, tempo, ppq, flp_path):
+    """One .mid per track -- merge all patterns on that track by timeline."""
+    if not track_seqs:
+        return
+    from mido import MidiFile, MidiTrack, MetaMessage
+
+    base = os.path.splitext(os.path.basename(flp_path))[0]
+    mdir = f"{base}_midi_tracks"
+    os.makedirs(mdir, exist_ok=True)
+
+    # name -> notes index
+    pnotes = {}
+    for pname, notes in raw_patterns.items():
+        pnotes[pname] = notes
+
+    for tid, td in track_seqs.items():
+        mid = MidiFile(ticks_per_beat=ppq)
+        t0 = MidiTrack()
+        mid.tracks.append(t0)
+        t0.append(MetaMessage("set_tempo", tempo=int(60_000_000 / tempo), time=0))
+
+        ch_all = OrderedDict()
+        for ev in td["events"]:
+            pn = ev["pattern_name"]
+            offset = ev["start"]
+            if pn in pnotes:
+                for pos, key, dur, ch_id, ch_name in pnotes[pn]:
+                    if ch_id not in ch_all:
+                        ch_all[ch_id] = {"name": ch_name, "notes": []}
+                    ch_all[ch_id]["notes"].append((pos + offset, key, dur))
+
+        for idx, (ch_id, ch_data) in enumerate(ch_all.items()):
+            _write_midi_track(
+                mid, ch_id, ch_data["name"], ch_data["notes"], ppq, tempo, idx % 16
+            )
+
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in td["name"])
+        mpath = os.path.join(mdir, f"{safe}.mid")
+        mid.save(mpath)
+        print(f"[OK] Track MIDI {td['name']} -> {mpath}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def extract_flp_notes(flp_path):
-    """主处理函数"""
     print(f"\n{'=' * 50}")
     print(f"FlpInfoer {VERSION}")
     print(f"{'=' * 50}\n")
-    print(f"分析工程: {os.path.basename(flp_path)}")
-    
-    start_time = time.time()
-    process_result = "完成"
-    
+    print(f"Analyzing: {os.path.basename(flp_path)}")
+
+    t0 = time.time()
+
     try:
-        print("加载工程文件...")
+        print("Loading...")
         project = parse(flp_path)
-        ppq = getattr(project, 'ppq', 96)
-        print(f"工程加载成功，PPQ分辨率: {ppq}")
-        
-        # 创建Pattern映射
-        pattern_mapping = create_pattern_mapping(project)
-        print(f"创建Pattern映射: 包含 {len(pattern_mapping)} 个Pattern")
-        
-        # 解析音符数据
-        print("\n解析音符数据...")
+        ppq = getattr(project, "ppq", 96)
+        tempo = getattr(project, "tempo", 120.0)
+        print(f"Loaded  Tempo={tempo} BPM  PPQ={ppq}")
+
         channel_map = create_channel_map(project)
-        all_notes, pattern_notes, tempo, ppq = analyze_patterns(project, channel_map)
-        print(f"找到 {len(all_notes)} 个音符")
-        
-        # 导出音符结果
-        print("\n导出音符数据...")
-        export_results(flp_path, all_notes, pattern_notes, tempo, ppq)
-        
-        # 解析播放列表
-        print("\n解析播放列表...")
-        track_patterns = parse_playlist(project, pattern_mapping)
-        
-        if track_patterns:
-            print("\n导出音轨序列...")
-            export_track_sequences(flp_path, track_patterns, ppq)
-        
+
+        print("\nParsing notes...")
+        _, _, raw_patterns, total = _consume_pattern_notes(project, channel_map)
+        print(f"Found {total} notes in {len(raw_patterns)} pattern(s)")
+
+        ptn_names = list(raw_patterns.keys())
+        pattern_index_by_name = {n: i for i, n in enumerate(ptn_names)}
+
+        # Text export
+        print("\n--- Text Export ---")
+        export_results(flp_path, raw_patterns, tempo, ppq)
+
+        # Playlist
+        print("\n--- Playlist ---")
+        track_seqs = parse_playlist(project, pattern_index_by_name)
+        if track_seqs:
+            export_track_sequences(flp_path, track_seqs, ppq)
+
+        # MIDI export
+        print("\n--- MIDI Export ---")
+        print("Pattern MIDI...")
+        export_pattern_midi(raw_patterns, tempo, ppq, flp_path)
+
+        if track_seqs:
+            print("Track MIDI...")
+            export_track_midi(raw_patterns, track_seqs, tempo, ppq, flp_path)
+
+        print(f"\n{'=' * 50}")
+        print("All done!")
+
     except Exception as e:
-        print(f"\n解析失败: {str(e)}")
+        print(f"\nError: {e}")
         traceback.print_exc()
-        process_result = "失败"
-    
-    process_time = time.time() - start_time
-    print(f"\n处理{process_result}! 用时: {process_time:.2f}秒")
+
+    print(f"Time: {time.time() - t0:.2f}s")
+
 
 def main():
-    """程序入口"""
-    print(f"FL Studio 音符提取工具 {VERSION}")
-    
+    _fix_stdout()
+    print(f"FL Studio Note Extraction Tool {VERSION}")
+
     if len(sys.argv) < 2:
-        print("\n请将FLP文件拖放到此脚本上")
-        print("或输入文件路径: ", end="")
+        print("\nDrag .flp file here or enter path: ", end="")
         flp_path = input().strip('"')
     else:
         flp_path = sys.argv[1]
-    
+
     flp_path = flp_path.strip('"')
-    
+
     if not os.path.isfile(flp_path):
-        print(f"\n错误: 文件不存在: {flp_path}")
-        print("\n按Enter键退出...")
+        print(f"\nError: file not found: {flp_path}")
+        print("\nPress Enter to exit...")
         input()
         return
-    
-    # 增加递归深度
+
     sys.setrecursionlimit(10000)
-    
-    # 确保输出缓冲区立即刷新
-    sys.stdout.flush()
-    
-    # 添加工程文件检查
-    if not flp_path.lower().endswith('.flp'):
-        print(f"\n警告: 文件扩展名不是.flp: {flp_path}")
-        print("继续处理...")
-    
+
+    if not flp_path.lower().endswith(".flp"):
+        print(f"\nWarning: not a .flp file: {flp_path}")
+
     extract_flp_notes(flp_path)
-    print("\n按Enter键退出...")
+    print("\nPress Enter to exit...")
     input()
+
 
 if __name__ == "__main__":
     main()
