@@ -1,19 +1,16 @@
 # FlpInfoer
 ([If you need an English README... Click here](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md))
 
-这是一个基于Python3.10和[PyFlp](https://github.com/demberto/PyFLP)V2.2.1的用于读取生成于[FlStudio](https://www.image-line.com/fl-studio/)的特殊格式工程文件.flp文件的第三方项目
+这是一个基于Python3.10和[PyFlp](https://github.com/demberto/PyFLP)V2.2.1，使用[mido](https://github.com/mido/mido)导出MIDI的第三方.flp工程文件解析工具
+
 ### 目前已经实现的功能有:
-1.导出所有音符(按Pattern分组)✅
+1. 导出所有音符(按Pattern分组) ✅
+2. 按Pattern分文件导出音符 ✅
+3. 导出速度(BPM) ✅
+4. 按Pattern分别导出.mid文件 ✅
+5. 按音轨导出完整乐曲的.mid文件（带乐器名分轨） ✅
+6. 导出播放列表音轨Pattern序列 ✅
 
-2.按Pattern分文件导出音符✅
-
-3.导出速度(BPM) ✅
-### 未来将会支持:
-1.按Pattern分别导出.mid文件❌
-
-2.按音轨导出Pattem❌
-
-3.按音轨导出完整乐曲的.mid文件❌
 ### 格式与位置:
 导出音符格式: [开始小节:步:嘀嗒-结束小节:步:嘀嗒,音高,乐器名] (持续=ticks)
 
@@ -36,7 +33,7 @@
 本项目代码版权归作者所有，允许在 GPL-3.0 license 下使用。
 
 ### 图标版权声明
-本项目所使用的图标（以下简称“图标”）由 Renzic_Stone 原创设计，享有完整的版权及相关知识产权。
+本项目所使用的图标（以下简称"图标"）由 Renzic_Stone 原创设计，享有完整的版权及相关知识产权。
 
 您可以在非商业用途下自由使用、修改、分发该图标，需保留作者署名。商业用途请联系作者获取授权。
 
