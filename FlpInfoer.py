@@ -13,7 +13,7 @@ from collections import OrderedDict
 from pyflp import parse
 from pyflp.arrangement import PlaylistEvent
 
-VERSION = "V0.3.0"
+VERSION = "V0.3.1"
 
 
 def _fix_stdout():
