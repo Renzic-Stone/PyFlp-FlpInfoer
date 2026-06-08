@@ -3,6 +3,7 @@ Python 3.10 + PyFlp 2.2.1 + mido
 """
 
 import io
+import math
 import os
 import re
 import shutil
@@ -11,7 +12,7 @@ import time
 import traceback
 from collections import OrderedDict
 
-VERSION = "V0.4.0"
+VERSION = "V0.5.0"
 REQUIRED_PYTHON = (3, 10)
 
 
@@ -84,9 +85,32 @@ def _safe_int(value, default=0):
     if value is None:
         return default
     if isinstance(value, (int, float)):
-        return int(value)
+        try:
+            if isinstance(value, float) and not math.isfinite(value):
+                return default
+            return int(value)
+        except Exception:
+            return default
     try:
         return int(value)
+    except Exception:
+        return default
+
+
+def _safe_getattr(obj, attr, default=None):
+    """Read PyFLP properties that may raise when the backing event is absent."""
+    try:
+        value = getattr(obj, attr)
+    except Exception:
+        return default
+    return default if value is None else value
+
+
+def _safe_bool(value, default=False):
+    if value is None:
+        return default
+    try:
+        return bool(value)
     except Exception:
         return default
 
@@ -163,15 +187,18 @@ def _channel_fallback(channel_id, index=None):
 
 def _channel_name(channel, fallback):
     for attr in ("display_name", "name", "internal_name"):
-        value = getattr(channel, attr, None)
+        value = _safe_getattr(channel, attr, None)
         if value:
             return _display_name(value, fallback)
     return fallback
 
 
 def _pattern_label(pattern, index, used):
-    iid = getattr(pattern, "iid", index + 1)
-    name = _display_name(getattr(pattern, "name", None), f"NONAME{index + 1:03d}")
+    iid = _safe_getattr(pattern, "iid", index + 1)
+    name = _display_name(
+        _safe_getattr(pattern, "name", None),
+        f"NONAME{index + 1:03d}",
+    )
     label = name
     suffix = 2
     while label.lower() in used:
@@ -185,99 +212,159 @@ def _pattern_label(pattern, index, used):
 # Parse
 # ---------------------------------------------------------------------------
 
-def create_channel_map(project):
-    cmap = {}
+def create_channel_info(project):
+    info = OrderedDict()
     try:
         for i, ch in enumerate(project.channels):
             try:
-                cid = getattr(ch, "iid", getattr(ch, "id", i))
+                cid = _safe_getattr(ch, "iid", _safe_getattr(ch, "id", i))
+                cid = _safe_int(cid, i)
                 cname = _channel_name(ch, _channel_fallback(cid, i))
-                cmap[cid] = cname
+                enabled = _safe_bool(_safe_getattr(ch, "enabled", True), True)
+                info[cid] = {"name": cname, "enabled": enabled}
             except Exception:
-                cmap[i] = _channel_fallback(i, i)
+                info[i] = {"name": _channel_fallback(i, i), "enabled": True}
     except Exception as e:
-        print(f"Channel map failed: {e}")
-    return cmap
+        print(f"Channel info failed: {e}")
+    return info
 
 
-def _consume_pattern_notes(project, channel_map):
+def create_channel_map(project):
+    return {cid: data["name"] for cid, data in create_channel_info(project).items()}
+
+
+def _consume_pattern_notes(project, channel_info):
     """Extract raw note data from all patterns.
     Returns:
-        tempo, ppq, raw_patterns, total_count, pattern_labels_by_iid
+        tempo, ppq, raw_patterns, total_count, pattern_labels_by_iid, note_stats
     """
-    tempo = getattr(project, "tempo", 120.0)
-    ppq = getattr(project, "ppq", 96)
+    tempo = _safe_getattr(project, "tempo", 120.0)
+    ppq = _safe_getattr(project, "ppq", 96)
     raw = OrderedDict()
     pattern_labels_by_iid = {}
     used_pattern_labels = set()
     total = 0
+    note_stats = {
+        "skipped_disabled_notes": 0,
+        "disabled_channels": OrderedDict(),
+    }
 
     for i, pat in enumerate(project.patterns):
         name = _pattern_label(pat, i, used_pattern_labels)
-        iid = getattr(pat, "iid", i + 1)
+        iid = _safe_getattr(pat, "iid", i + 1)
         pattern_labels_by_iid[iid] = name
         notes_out = []
-        raw_notes = list(getattr(pat, "notes", []))
+        raw_notes = list(_safe_getattr(pat, "notes", []))
         for note in raw_notes:
             try:
-                pos = _safe_int(getattr(note, "position", 0))
-                key = getattr(note, "key", 60)
+                pos = _safe_int(_safe_getattr(note, "position", 0))
+                key = _safe_getattr(note, "key", 60)
                 dur = _safe_int(
-                    getattr(note, "duration", getattr(note, "length", 0)), 0
+                    _safe_getattr(note, "duration", _safe_getattr(note, "length", 0)),
+                    0,
                 )
                 if dur <= 0:
                     dur = ppq // 4  # default 1/16
                 ch = _safe_int(
-                    getattr(note, "rack_channel", getattr(note, "channel", -1)), -1
+                    _safe_getattr(note, "rack_channel", _safe_getattr(note, "channel", -1)),
+                    -1,
                 )
-                velocity = _safe_int(getattr(note, "velocity", 100), 100)
-                ch_name = channel_map.get(ch, _channel_fallback(ch))
+                velocity = _safe_int(_safe_getattr(note, "velocity", 100), 100)
+                ch_data = channel_info.get(
+                    ch,
+                    {"name": _channel_fallback(ch), "enabled": True},
+                )
+                ch_name = ch_data["name"]
+                if not ch_data.get("enabled", True):
+                    note_stats["skipped_disabled_notes"] += 1
+                    note_stats["disabled_channels"][ch] = ch_name
+                    continue
                 notes_out.append((pos, key, dur, velocity, ch, ch_name))
             except Exception as e:
                 print(f"  Skip bad note: {e}")
         raw[name] = notes_out
         total += len(notes_out)
 
-    return tempo, ppq, raw, total, pattern_labels_by_iid
+    return tempo, ppq, raw, total, pattern_labels_by_iid, note_stats
+
+
+def _item_offsets(item):
+    offsets = _safe_getattr(item, "offsets", (0, 0))
+    if not isinstance(offsets, (tuple, list)) or len(offsets) < 2:
+        offsets = (0, 0)
+    return _safe_int(offsets[0], 0), _safe_int(offsets[1], 0)
 
 
 def parse_playlist(project, pattern_labels_by_iid):
     """Parse playlist -> track sequences.
-    Returns: {track_id: {"name": str, "events": [{pattern_name,start,length,end}]}}
+    Returns:
+        track_seqs,
+        playlist_stats
     """
     track_seqs = OrderedDict()
+    playlist_stats = {
+        "skipped_disabled_tracks": [],
+        "skipped_muted_items": [],
+        "unsupported_items": [],
+        "offset_items": [],
+        "total_pattern_items": 0,
+    }
 
-    arrangements = list(getattr(project, "arrangements", []) or [])
+    arrangements = list(_safe_getattr(project, "arrangements", []) or [])
     if not arrangements:
-        return track_seqs
+        return track_seqs, playlist_stats
 
     item_count = 0
     arr = arrangements[0]
     for track_index, track in enumerate(arr.tracks, start=1):
-        track_id = _safe_int(getattr(track, "iid", track_index), track_index)
-        track_name = _display_name(getattr(track, "name", None), f"Track{track_id}")
+        track_id = _safe_int(_safe_getattr(track, "iid", track_index), track_index)
+        track_name = _display_name(_safe_getattr(track, "name", None), f"Track{track_id}")
+        track_enabled = _safe_bool(_safe_getattr(track, "enabled", True), True)
         events = []
 
-        for item in track:
-            pat_obj = getattr(item, "pattern", None)
-            if pat_obj is None:
+        if not track_enabled:
+            playlist_stats["skipped_disabled_tracks"].append(track_name)
+            continue
+
+        for item_index, item in enumerate(track, start=1):
+            if _safe_bool(_safe_getattr(item, "muted", False), False):
+                playlist_stats["skipped_muted_items"].append(
+                    f"{track_name} item {item_index}"
+                )
                 continue
 
-            pattern_iid = getattr(pat_obj, "iid", None)
+            pat_obj = _safe_getattr(item, "pattern", None)
+            if pat_obj is None:
+                playlist_stats["unsupported_items"].append(
+                    f"{track_name} item {item_index}: {type(item).__name__}"
+                )
+                continue
+
+            pattern_iid = _safe_getattr(pat_obj, "iid", None)
             pname = pattern_labels_by_iid.get(
                 pattern_iid,
-                _display_name(getattr(pat_obj, "name", None), f"Pattern_{pattern_iid}"),
+                _display_name(
+                    _safe_getattr(pat_obj, "name", None),
+                    f"Pattern_{pattern_iid}",
+                ),
             )
-            start = _safe_int(getattr(item, "position", getattr(item, "start", 0)), 0)
-            length = _safe_int(getattr(item, "length", 0), 0)
+            start = _safe_int(_safe_getattr(item, "position", _safe_getattr(item, "start", 0)), 0)
+            length = _safe_int(_safe_getattr(item, "length", 0), 0)
             if length <= 0:
-                length = _safe_int(getattr(pat_obj, "length", 0), 0)
+                length = _safe_int(_safe_getattr(pat_obj, "length", 0), 0)
+            offset_start, offset_end = _item_offsets(item)
+            if offset_start or offset_end:
+                playlist_stats["offset_items"].append(
+                    f"{track_name} / {pname}: start={offset_start}, end={offset_end}"
+                )
 
             events.append({
                 "pattern_name": pname,
                 "start": start,
                 "length": length,
                 "end": start + length,
+                "offset_start": offset_start,
+                "offset_end": offset_end,
             })
             item_count += 1
 
@@ -285,8 +372,9 @@ def parse_playlist(project, pattern_labels_by_iid):
             track_seqs[track_id] = {"name": track_name, "events": events}
 
     print(f"  Playlist pattern items: {item_count}")
+    playlist_stats["total_pattern_items"] = item_count
 
-    return track_seqs
+    return track_seqs, playlist_stats
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +437,16 @@ def export_track_sequences(output_dir, flp_path, track_seqs, ppq):
             for ev in td["events"]:
                 s = calculate_fl_position(ev["start"], ppq)
                 e = calculate_fl_position(ev["end"], ppq)
-                f.write(f"[{s}-{e}] {ev['pattern_name']} (dur={ev['length']}ticks)\n")
+                extra = ""
+                if ev.get("offset_start") or ev.get("offset_end"):
+                    extra = (
+                        f" offset=start:{ev.get('offset_start', 0)}"
+                        f"/end:{ev.get('offset_end', 0)}"
+                    )
+                f.write(
+                    f"[{s}-{e}] {ev['pattern_name']} "
+                    f"(dur={ev['length']}ticks{extra})\n"
+                )
             f.write("\n")
     print(f"[OK] Track sequences -> {path}")
     return 1
@@ -504,6 +601,30 @@ def export_pattern_midis(output_dir, raw_patterns, tempo, ppq):
     return {"midi_count": midi_count, "empty_patterns": empty_patterns}
 
 
+def _place_note_on_playlist(note, event):
+    """Place a Pattern note inside a Playlist clip's visible window."""
+    pos, key, dur, velocity, ch_id, ch_name = note
+    note_start = _safe_int(pos, 0)
+    note_end = note_start + max(0, _safe_int(dur, 0))
+    if note_end <= note_start:
+        return None, False
+
+    visible_start = max(0, _safe_int(event.get("offset_start", 0), 0))
+    clip_length = _safe_int(event.get("length", 0), 0)
+    visible_end = visible_start + clip_length if clip_length > 0 else None
+
+    clipped_start = max(note_start, visible_start)
+    clipped_end = note_end if visible_end is None else min(note_end, visible_end)
+    if clipped_end <= clipped_start:
+        return None, False
+
+    out_pos = _safe_int(event.get("start", 0), 0) + (clipped_start - visible_start)
+    out_dur = clipped_end - clipped_start
+    placed = (out_pos, key, out_dur, velocity, ch_id, ch_name)
+    clipped = clipped_start != note_start or clipped_end != note_end
+    return placed, clipped
+
+
 def export_track_midis(output_dir, raw_patterns, track_seqs, tempo, ppq):
     """Export one folder per Playlist Track and one MIDI per active channel."""
     tracks_dir = os.path.join(output_dir, "tracks")
@@ -512,6 +633,9 @@ def export_track_midis(output_dir, raw_patterns, track_seqs, tempo, ppq):
     pnotes = {pname: notes for pname, notes in raw_patterns.items()}
     midi_count = 0
     skipped_tracks = []
+    missing_patterns = []
+    clipped_notes = 0
+    placed_notes = 0
 
     for t_index, (tid, td) in enumerate(
         sorted(track_seqs.items(), key=lambda x: x[0]),
@@ -520,10 +644,17 @@ def export_track_midis(output_dir, raw_patterns, track_seqs, tempo, ppq):
         track_notes = []
         for ev in td["events"]:
             pn = ev["pattern_name"]
-            offset = ev["start"]
-            if pn in pnotes:
-                for pos, key, dur, velocity, ch_id, ch_name in pnotes[pn]:
-                    track_notes.append((pos + offset, key, dur, velocity, ch_id, ch_name))
+            if pn not in pnotes:
+                missing_patterns.append(f"{td['name']} / {pn}")
+                continue
+            for note in pnotes[pn]:
+                placed, clipped = _place_note_on_playlist(note, ev)
+                if placed is None:
+                    continue
+                track_notes.append(placed)
+                placed_notes += 1
+                if clipped:
+                    clipped_notes += 1
 
         ch_all = _group_notes_by_channel(track_notes)
         if not ch_all:
@@ -546,7 +677,13 @@ def export_track_midis(output_dir, raw_patterns, track_seqs, tempo, ppq):
             midi_count += 1
             print(f"[OK] Track MIDI {td['name']} / {cname} -> {mpath}")
 
-    return {"midi_count": midi_count, "skipped_tracks": skipped_tracks}
+    return {
+        "midi_count": midi_count,
+        "skipped_tracks": skipped_tracks,
+        "missing_patterns": missing_patterns,
+        "clipped_notes": clipped_notes,
+        "placed_notes": placed_notes,
+    }
 
 
 def export_summary(
@@ -560,6 +697,8 @@ def export_summary(
     text_stats,
     pattern_stats,
     track_stats,
+    note_stats,
+    playlist_stats,
 ):
     path = os.path.join(output_dir, "summary.txt")
     channel_names = OrderedDict()
@@ -595,6 +734,20 @@ def export_summary(
             f.write("(none)\n")
         f.write("\n")
 
+        f.write("Disabled Channels\n")
+        f.write("-" * 20 + "\n")
+        disabled_channels = note_stats.get("disabled_channels", {})
+        if disabled_channels:
+            for ch_id, name in disabled_channels.items():
+                f.write(f"- id={ch_id} name={name}\n")
+            f.write(
+                f"Skipped notes on disabled channels: "
+                f"{note_stats.get('skipped_disabled_notes', 0)}\n"
+            )
+        else:
+            f.write("(none)\n")
+        f.write("\n")
+
         f.write("Empty Patterns\n")
         f.write("-" * 20 + "\n")
         if pattern_stats["empty_patterns"]:
@@ -613,16 +766,65 @@ def export_summary(
             f.write("(none)\n")
         f.write("\n")
 
+        f.write("Skipped Playlist Items\n")
+        f.write("-" * 20 + "\n")
+        wrote_skip = False
+        if playlist_stats.get("skipped_disabled_tracks"):
+            wrote_skip = True
+            f.write("Disabled tracks:\n")
+            for name in playlist_stats["skipped_disabled_tracks"]:
+                f.write(f"- {name}\n")
+        if playlist_stats.get("skipped_muted_items"):
+            wrote_skip = True
+            f.write("Muted pattern clips:\n")
+            for name in playlist_stats["skipped_muted_items"]:
+                f.write(f"- {name}\n")
+        if playlist_stats.get("unsupported_items"):
+            wrote_skip = True
+            f.write("Unsupported non-pattern playlist items:\n")
+            for name in playlist_stats["unsupported_items"]:
+                f.write(f"- {name}\n")
+        if track_stats.get("missing_patterns"):
+            wrote_skip = True
+            f.write("Missing pattern references:\n")
+            for name in track_stats["missing_patterns"]:
+                f.write(f"- {name}\n")
+        if not wrote_skip:
+            f.write("(none)\n")
+        f.write("\n")
+
+        f.write("Clip Trimming and Offsets\n")
+        f.write("-" * 20 + "\n")
+        f.write(f"Playlist notes placed: {track_stats.get('placed_notes', 0)}\n")
+        f.write(f"Notes clipped by Playlist item bounds: {track_stats.get('clipped_notes', 0)}\n")
+        if playlist_stats.get("offset_items"):
+            f.write("Items with offsets:\n")
+            for name in playlist_stats["offset_items"]:
+                f.write(f"- {name}\n")
+        else:
+            f.write("Items with offsets: (none)\n")
+        f.write("\n")
+
         f.write("Notes\n")
         f.write("-" * 20 + "\n")
-        f.write("V0.4 exports notes, tempo, velocity, Pattern positions, and names.\n")
-        f.write("Muted clips/channels, clip offsets, and advanced edge cases are planned for V0.5.\n")
+        f.write("V0.5 skips disabled channels, disabled Playlist tracks, and muted Pattern clips.\n")
+        f.write("Track MIDI placement respects Playlist clip length and start offsets when PyFLP exposes them.\n")
+        f.write("Audio clips, automation clips, plugin sounds, mixer effects, and full playback state are still outside this MIDI-only scope.\n")
 
     print(f"[OK] Summary -> {path}")
     return path
 
 
-def export_project(flp_path, raw_patterns, tempo, ppq, total_notes, track_seqs):
+def export_project(
+    flp_path,
+    raw_patterns,
+    tempo,
+    ppq,
+    total_notes,
+    track_seqs,
+    note_stats,
+    playlist_stats,
+):
     output_dir = _prepare_output_dir(flp_path)
     print(f"\nOutput folder: {output_dir}")
 
@@ -647,6 +849,8 @@ def export_project(flp_path, raw_patterns, tempo, ppq, total_notes, track_seqs):
         text_stats,
         pattern_stats,
         track_stats,
+        note_stats,
+        playlist_stats,
     )
     return output_dir
 
@@ -668,24 +872,33 @@ def extract_flp_notes(flp_path):
     try:
         print("Loading...")
         project = parse(flp_path)
-        ppq = getattr(project, "ppq", 96)
-        tempo = getattr(project, "tempo", 120.0)
+        ppq = _safe_getattr(project, "ppq", 96)
+        tempo = _safe_getattr(project, "tempo", 120.0)
         print(f"Loaded  Tempo={tempo} BPM  PPQ={ppq}")
 
-        channel_map = create_channel_map(project)
+        channel_info = create_channel_info(project)
 
         print("\nParsing notes...")
-        _, _, raw_patterns, total, pattern_labels_by_iid = _consume_pattern_notes(
+        _, _, raw_patterns, total, pattern_labels_by_iid, note_stats = _consume_pattern_notes(
             project,
-            channel_map,
+            channel_info,
         )
         print(f"Found {total} notes in {len(raw_patterns)} pattern(s)")
 
         print("\n--- Playlist ---")
-        track_seqs = parse_playlist(project, pattern_labels_by_iid)
+        track_seqs, playlist_stats = parse_playlist(project, pattern_labels_by_iid)
 
         print("\n--- Export ---")
-        export_project(flp_path, raw_patterns, tempo, ppq, total, track_seqs)
+        export_project(
+            flp_path,
+            raw_patterns,
+            tempo,
+            ppq,
+            total,
+            track_seqs,
+            note_stats,
+            playlist_stats,
+        )
 
         print(f"\n{'=' * 50}")
         print("All done!")

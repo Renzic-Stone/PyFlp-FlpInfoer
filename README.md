@@ -14,6 +14,9 @@ FlpInfoer 是一个基于 Python 3.10、[PyFLP](https://github.com/demberto/PyFL
 6. 导出播放列表轨道上的 Pattern 序列
 7. 保留 PyFLP 读取到的 note velocity
 8. 保持实际 MIDI 音高听感，不追求跨 DAW 的八度显示名一致
+9. Playlist Track MIDI 会按 clip length 和 start offset 裁剪/偏移音符
+10. 跳过 disabled Channel、disabled Playlist Track 和 muted Pattern clip
+11. 在 `summary.txt` 中记录被跳过的轨道、clip、非 Pattern 项目和裁剪统计
 
 ## 使用要求
 - Python 3.10
@@ -69,7 +72,9 @@ MIDI 文件只保存 note number，不保存 `C4` / `C5` 这类显示名。不�
 FlpInfoer 默认以听感和可回收性为准：保留 FL Studio / PyFLP 中的实际音高，不为了让其他 DAW 显示相同的八度名而自动移调。
 
 ## 边界
-本工具目前只提取 MIDI 相关信息，例如音符、速度、Pattern、Playlist Track 中的 Pattern 位置和乐器名。它不会导出或还原插件音色、混音台效果、音频、自动化或工程里的完整播放状态。Muted、clip 裁剪、clip offset 等复杂状态计划在 V0.5 处理。
+本工具目前只提取 MIDI 相关信息，例如音符、速度、Pattern、Playlist Track 中的 Pattern 位置和乐器名。V0.5 会尽量让 Playlist Track MIDI 接近实际可听状态：disabled Channel、disabled Playlist Track 和 muted Pattern clip 会被跳过，clip length 与 start offset 会参与轨道拼接。
+
+它仍然不会导出或还原插件音色、混音台效果、音频、自动化，或工程里的完整播放状态。音频 clip、自动化 clip 等非 Pattern 播放列表项目会在 `summary.txt` 中标记为 unsupported，而不是转换为 MIDI。
 
 > 注意：本项目与 [FL Studio](https://www.image-line.com/fl-studio/) 和 [FlpInfo](https://github.com/demberto/FLPInfo) 无关。后者同样依赖 PyFLP，但已停止更新。
 

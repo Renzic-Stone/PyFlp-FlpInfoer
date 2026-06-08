@@ -1,5 +1,31 @@
 # Release Notes
 
+## V0.5.0
+
+### 中文
+- Playlist Track MIDI 拼接现在会按 Pattern clip 的可见长度裁剪音符。
+- 支持 Pattern clip 的 start offset：左侧裁剪后的 clip 会把音符放到正确的轨道时间位置。
+- 跳过 disabled Channel、disabled Playlist Track 和 muted Pattern clip，使导出的轨道 MIDI 更接近实际可听状态。
+- 对 PyFLP 中可能缺失的 `muted`、`offsets`、`enabled` 等字段改用安全读取，减少真实工程里的异常中断。
+- `summary.txt` 新增 disabled Channel、跳过的 Playlist 项目、非 Pattern 项目、offset 项目和裁剪统计。
+- 更新中文、英文、日文 README，说明 V0.5 能力和仍不处理的音频、自动化、插件、混音台边界。
+
+### English
+- Playlist Track MIDI placement now trims notes by the visible length of each Pattern clip.
+- Pattern clip start offsets are respected, so left-trimmed clips place notes at the correct track timeline positions.
+- Disabled Channels, disabled Playlist Tracks, and muted Pattern clips are skipped so track MIDI is closer to the audible project state.
+- PyFLP fields that may be absent, such as `muted`, `offsets`, and `enabled`, are now read safely to reduce crashes on real projects.
+- `summary.txt` now reports disabled Channels, skipped Playlist items, unsupported non-Pattern items, offset items, and trimming stats.
+- Updated Chinese, English, and Japanese READMEs with the V0.5 behavior and the remaining audio, automation, plugin, and mixer boundaries.
+
+### 日本語
+- Playlist Track MIDI の配置で、各 Pattern clip の可視長に合わせてノートをトリミングするようにしました。
+- Pattern clip の start offset に対応し、左側がトリミングされた clip でも正しいトラック時間位置にノートを配置します。
+- disabled Channel、disabled Playlist Track、muted Pattern clip をスキップし、トラック MIDI を実際に聴こえる状態へ近づけました。
+- PyFLP で存在しない場合がある `muted`、`offsets`、`enabled` などのフィールドを安全に読み取り、実プロジェクトでの異常終了を減らしました。
+- `summary.txt` に disabled Channel、スキップされた Playlist item、非 Pattern item、offset item、トリミング統計を追加しました。
+- 中国語・英語・日本語 README を更新し、V0.5 の挙動と、引き続き対象外である音声・オートメーション・プラグイン・ミキサーの範囲を説明しました。
+
 ## V0.4.0
 
 ### 中文

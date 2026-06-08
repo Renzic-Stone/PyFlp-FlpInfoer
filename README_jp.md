@@ -14,6 +14,9 @@ FlpInfoer は、Python 3.10、[PyFLP](https://github.com/demberto/PyFLP) v2.2.1�
 6. Playlist Track 上の Pattern シーケンス出力
 7. PyFLP から読み取った note velocity の保持
 8. DAW 間のオクターブ表示名ではなく、実際の再生音高を保持
+9. Playlist Track MIDI で clip length と start offset によるノートのトリミング/オフセットを反映
+10. disabled Channel、disabled Playlist Track、muted Pattern clip をスキップ
+11. スキップされた track / clip / 非 Pattern item とトリミング統計を `summary.txt` に記録
 
 ## 必要環境
 - Python 3.10
@@ -69,7 +72,9 @@ MIDI ファイルは note number を保存し、`C4` / `C5` のような表示�
 FlpInfoer はデフォルトで FL Studio / PyFLP 上の実際の再生音高を保持します。他の DAW で同じオクターブ名を表示させるための自動移調は行いません。
 
 ## 範囲
-FlpInfoer が現在抽出するのは、ノート、テンポ、Pattern、Playlist Track 上の Pattern 位置、楽器名などの MIDI 関連情報です。プラグイン音色、ミキサーエフェクト、音声、オートメーション、プロジェクト全体の再生状態は出力・再現しません。Muted、clip trimming、clip offset などの複雑な状態は V0.5 で対応予定です。
+FlpInfoer が現在抽出するのは、ノート、テンポ、Pattern、Playlist Track 上の Pattern 位置、楽器名などの MIDI 関連情報です。V0.5 では Playlist Track MIDI を実際に聴こえる状態へ近づけるため、disabled Channel、disabled Playlist Track、muted Pattern clip をスキップし、clip length と start offset をタイムライン配置に反映します。
+
+それでも、プラグイン音色、ミキサーエフェクト、音声、オートメーション、プロジェクト全体の再生状態は出力・再現しません。Audio clip、automation clip などの非 Pattern プレイリスト項目は MIDI に変換せず、`summary.txt` で unsupported として記録します。
 
 > 注意: このプロジェクトは [FL Studio](https://www.image-line.com/fl-studio/) および [FlpInfo](https://github.com/demberto/FLPInfo) とは無関係です。FlpInfo も PyFLP に依存していますが、現在は保守されていません。
 

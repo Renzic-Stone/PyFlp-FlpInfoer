@@ -14,6 +14,9 @@ The goal is not to fully convert an FL Studio project. FlpInfoer focuses on resc
 6. Export Playlist Track Pattern sequences
 7. Preserve note velocity read by PyFLP
 8. Preserve actual playback pitch instead of matching octave display names across DAWs
+9. Trim and offset Playlist Track MIDI notes by clip length and start offset
+10. Skip disabled Channels, disabled Playlist Tracks, and muted Pattern clips
+11. Record skipped tracks, clips, non-Pattern items, and trimming stats in `summary.txt`
 
 ## Requirements
 - Python 3.10
@@ -69,7 +72,9 @@ MIDI files store note numbers, not display names such as `C4` or `C5`. Different
 FlpInfoer preserves the actual FL Studio / PyFLP playback pitch by default. It does not automatically transpose notes just to make another DAW show the same octave label.
 
 ## Scope
-FlpInfoer currently extracts MIDI-related information such as notes, tempo, Patterns, Pattern positions on Playlist Tracks, and instrument names. It does not export or recreate plugin sounds, mixer effects, audio, automation, or the complete playback state of a project. Muted items, clip trimming, clip offsets, and other complex states are planned for V0.5.
+FlpInfoer currently extracts MIDI-related information such as notes, tempo, Patterns, Pattern positions on Playlist Tracks, and instrument names. V0.5 tries to make Playlist Track MIDI closer to the audible project state: disabled Channels, disabled Playlist Tracks, and muted Pattern clips are skipped, while clip length and start offset are respected during timeline placement.
+
+It still does not export or recreate plugin sounds, mixer effects, audio, automation, or the complete playback state of a project. Audio clips, automation clips, and other non-Pattern playlist items are marked as unsupported in `summary.txt` instead of being converted to MIDI.
 
 > Note: This project is not affiliated with [FL Studio](https://www.image-line.com/fl-studio/) or [FlpInfo](https://github.com/demberto/FLPInfo). FlpInfo also depends on PyFLP but is no longer maintained.
 
