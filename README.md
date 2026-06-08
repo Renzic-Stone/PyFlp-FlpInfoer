@@ -1,54 +1,81 @@
 # FlpInfoer
 ([English](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_en.md) / [日本語](https://github.com/Renzic-Stone/PyFlp-FlpInfoer/blob/main/README_jp.md))
 
-这是一个基于Python3.10和[PyFlp](https://github.com/demberto/PyFLP)V2.2.1，使用[mido](https://github.com/mido/mido)导出MIDI的第三方.flp工程文件解析工具
+FlpInfoer 是一个基于 Python 3.10、[PyFLP](https://github.com/demberto/PyFLP) v2.2.1 和 [mido](https://github.com/mido/mido) 的第三方 FL Studio `.flp` MIDI 提取工具。
 
-### 目前已经实现的功能有:
-1. 导出所有音符(按Pattern分组) ✅
-2. 按Pattern分文件导出音符 ✅
-3. 导出速度(BPM) ✅
-4. 按Pattern分别导出.mid文件 ✅
-5. 按音轨导出完整乐曲的.mid文件（带乐器名分轨） ✅
-6. 导出播放列表音轨Pattern序列 ✅
+本项目的目标不是完整转换 FL Studio 工程，而是把 `.flp` 中的 MIDI 信息尽量可靠地救出来，方便 DAW 迁移、跨软件协作、Vocaloid/SynthV 等外部人声工作流，以及缺少插件或电脑性能不足时的 MIDI 中介导出。
 
-### 格式与位置:
-导出音符格式: [开始小节:步:嘀嗒-结束小节:步:嘀嗒,音高,乐器名] (持续=ticks)
+## 目前已经实现的功能
+1. 导出所有音符，并按 Pattern 分组
+2. 按 Pattern 分文件导出文本音符
+3. 导出速度 BPM 和 PPQ
+4. 按 Pattern 分别导出 `.mid`
+5. 按 Playlist Track 导出完整时间线 `.mid`，并在 MIDI 内按乐器名分轨
+6. 导出播放列表轨道上的 Pattern 序列
+7. 保留 PyFLP 读取到的 note velocity
+8. 保持实际 MIDI 音高听感，不追求跨 DAW 的八度显示名一致
 
-音符位置说明: 小节(1开始):步(00-15,十六进制):嘀嗒(00-23,24进制),(与FlStudio钢琴卷帘内部标记一致)
+## 使用要求
+- Python 3.10
+- PyFLP 2.2.1
+- mido 1.3+
 
-本项目致力于解决FlStudio的完整.mid文件导出功能残缺问题(无法带乐器分乐轨,批量分pattern输出)
+PyFLP 2.2.1 在 Python 3.11 或更新版本上可能因 Enum 兼容性问题无法正常导入或解析。本项目当前按 Python 3.10 维护和测试。
 
-注意❗本项目与[FlStudio](https://www.image-line.com/fl-studio/)和[FlpInfo](https://github.com/demberto/FLPInfo)无关(后者同样依靠PyFlp库,但已停止更新),所有代码均为原创/AI生成后人工修改或重写
+```bash
+py -3.10 -m pip install -r requirements.txt
+py -3.10 FlpInfoer.py "你的工程.flp"
+```
 
+也可以运行脚本后把 `.flp` 路径拖入窗口。
 
-## 本项目遵循GPL-3.0 license
+## 当前输出
+以 `Song.flp` 为例，当前版本会在运行目录生成：
 
-本项目源码使用 GPL-3.0 license 授权，允许自由使用、修改与分发
-**但打包后的发行版（即发行版中附带图标的 .exe 可执行文件）所使用图标为 Renzic_Stone 原创设计且受版权保护.禁止在未经作者授权的情况下用于商业活动（例如以任何形式在电商平台销售或在博客平台设为仅VIP可见/收费下载,但可免费上传网盘/博客分发）**
+```text
+Song_all_notes.txt
+Song_patterns/
+Song_track_sequences.txt
+Song_midi_patterns/
+Song_midi_tracks/
+```
 
-### AI 协助说明(About AI)
+后续版本计划改进为更适合迁移和整理的目录结构，例如按 Pattern 文件夹和 Playlist Track 文件夹继续拆分到每个生效乐器。
 
-本项目部分由 生成式AI 辅助生成（如chatGPT等），所有内容已由作者本人整理、验证与修改。
+## 格式与位置
+文本音符格式：
 
-本项目代码版权归作者所有，允许在 GPL-3.0 license 下使用。
+```text
+[开始小节:步:嘀嗒-结束小节:步:嘀嗒,音高,乐器名] dur=ticks vel=velocity
+```
 
-### 图标版权声明
-本项目所使用的图标（以下简称"图标"）由 Renzic_Stone 原创设计，享有完整的版权及相关知识产权。
+位置格式为：小节（1 开始）: 步（00-15）: 嘀嗒。
+当 PPQ 为 96 时，每个十六分步为 24 tick；其他 PPQ 下嘀嗒范围会随 PPQ 改变。
 
-您可以在非商业用途下自由使用、修改、分发该图标，需保留作者署名。商业用途请联系作者获取授权。
+## MIDI 音高说明
+MIDI 文件只保存 note number，不保存 `C4` / `C5` 这类显示名。不同 DAW 对同一个 note number 的八度显示可能不同。
 
-作者保留对该图标的全部版权与最终解释权。
-除非另有明确说明，本图标不适用于GPL-3.0或其他开源软件许可证。
+FlpInfoer 默认以听感和可回收性为准：保留 FL Studio / PyFLP 中的实际音高，不为了让其他 DAW 显示相同的八度名而自动移调。
 
-#### 若需使用本图标，请通过以下方式联系作者以获得授权：
-GIthub账号:Renzic-Stone
-邮箱:rzs_@outlook.com
+## 边界
+本工具目前只提取 MIDI 相关信息，例如音符、速度、Pattern、Playlist Track 中的 Pattern 位置和乐器名。它不会导出或还原插件音色、混音台效果、音频、自动化或工程里的完整播放状态。
 
+> 注意：本项目与 [FL Studio](https://www.image-line.com/fl-studio/) 和 [FlpInfo](https://github.com/demberto/FLPInfo) 无关。后者同样依赖 PyFLP，但已停止更新。
 
+## 许可证
+**代码**：使用 GPL-3.0 license 授权，允许自由使用、修改与分发。
+
+**资产**：官方发行版中可能附带的 `.exe` 图标由 Renzic_Stone 原创设计并保留版权。除非另有明确说明，该图标不适用于 GPL-3.0 或其他开源软件许可证。
+
+- 可在非商业用途下自由分发带图标的官方发行包，需保留作者署名
+- 未经授权不得将该图标或带该图标的官方发行包用于商业销售、付费下载或 VIP 内容
+- 如需商业授权，请联系 [Renzic-Stone](https://github.com/Renzic-Stone) 或 rzs_@outlook.com
+
+自行从 GPL-3.0 源码构建并移除或替换非 GPL 图标的版本，按 GPL-3.0 条款分发。
+
+## AI 协助说明
+本项目部分内容由生成式 AI 辅助生成，所有内容已由作者本人整理、验证与修改。
 
 ## 联系作者
-如果遇到任何问题,欢迎通过GitHub/邮件联系作者
 - 作者：Renzic-Stone
-- 联系方式：rzs_@outlook.com
-
-..............
+- 邮箱：rzs_@outlook.com
