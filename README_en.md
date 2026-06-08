@@ -9,8 +9,8 @@ The goal is not to fully convert an FL Studio project. FlpInfoer focuses on resc
 1. Export all notes grouped by Pattern
 2. Export per-Pattern text note files
 3. Export BPM and PPQ
-4. Export `.mid` files per Pattern
-5. Export full-timeline `.mid` files per Playlist Track, with instrument-named MIDI tracks inside
+4. Export one folder per Pattern, with separate `.mid` files for each active instrument
+5. Export one folder per Playlist Track, merging Pattern clips on the timeline and splitting the result by instrument
 6. Export Playlist Track Pattern sequences
 7. Preserve note velocity read by PyFLP
 8. Preserve actual playback pitch instead of matching octave display names across DAWs
@@ -30,17 +30,28 @@ py -3.10 FlpInfoer.py "your project.flp"
 You can also run the script and drag the `.flp` path into the console window.
 
 ## Current Output
-For `Song.flp`, the current version generates:
+For `Song.flp`, the current version generates a folder next to the program:
 
 ```text
-Song_all_notes.txt
-Song_patterns/
-Song_track_sequences.txt
-Song_midi_patterns/
-Song_midi_tracks/
+Song/
+  all_notes.txt
+  summary.txt
+  texts/
+    track_sequences.txt
+    patterns/
+      001 - PatternName.txt
+      002 - NONAME002.txt
+  patterns/
+    001 - PatternName/
+      001 - InstrumentName.mid
+    002 - NONAME002/
+      _EMPTY.txt
+  tracks/
+    001 - Track1/
+      001 - InstrumentName.mid
 ```
 
-A future version is planned to use a migration-friendly folder layout that splits Pattern and Playlist Track exports further by active instrument.
+If the output folder already exists, FlpInfoer deletes it and rebuilds it. Unnamed Patterns use names such as `NONAME001`; unnamed Channels use names such as `NONAME_Channel001`. Empty Patterns keep a folder with `_EMPTY.txt`; empty Channels and empty Playlist Tracks are not generated.
 
 ## Format and Positioning
 Text note format:
@@ -58,7 +69,7 @@ MIDI files store note numbers, not display names such as `C4` or `C5`. Different
 FlpInfoer preserves the actual FL Studio / PyFLP playback pitch by default. It does not automatically transpose notes just to make another DAW show the same octave label.
 
 ## Scope
-FlpInfoer currently extracts MIDI-related information such as notes, tempo, Patterns, Pattern positions on Playlist Tracks, and instrument names. It does not export or recreate plugin sounds, mixer effects, audio, automation, or the complete playback state of a project.
+FlpInfoer currently extracts MIDI-related information such as notes, tempo, Patterns, Pattern positions on Playlist Tracks, and instrument names. It does not export or recreate plugin sounds, mixer effects, audio, automation, or the complete playback state of a project. Muted items, clip trimming, clip offsets, and other complex states are planned for V0.5.
 
 > Note: This project is not affiliated with [FL Studio](https://www.image-line.com/fl-studio/) or [FlpInfo](https://github.com/demberto/FLPInfo). FlpInfo also depends on PyFLP but is no longer maintained.
 

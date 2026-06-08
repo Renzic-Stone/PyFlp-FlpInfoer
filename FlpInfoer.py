@@ -5,12 +5,13 @@ Python 3.10 + PyFlp 2.2.1 + mido
 import io
 import os
 import re
+import shutil
 import sys
 import time
 import traceback
 from collections import OrderedDict
 
-VERSION = "V0.3.2"
+VERSION = "V0.4.0"
 REQUIRED_PYTHON = (3, 10)
 
 
@@ -111,6 +112,10 @@ def _safe_filename(name, fallback="untitled"):
     return name[:120]
 
 
+def _indexed_stem(index, name, fallback):
+    return f"{index:03d} - {_safe_filename(name, fallback)}"
+
+
 def _unique_stem(name, used, fallback="untitled"):
     stem = _safe_filename(name, fallback)
     candidate = stem
@@ -120,6 +125,40 @@ def _unique_stem(name, used, fallback="untitled"):
         index += 1
     used.add(candidate.lower())
     return candidate
+
+
+def _program_dir():
+    """Directory where the script or bundled executable lives."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _prepare_output_dir(flp_path):
+    base = os.path.splitext(os.path.basename(flp_path))[0]
+    out_name = _safe_filename(base, "FLP_Project")
+    program_dir = os.path.abspath(_program_dir())
+    output_dir = os.path.abspath(os.path.join(program_dir, out_name))
+
+    if os.path.commonpath([program_dir, output_dir]) != program_dir:
+        raise RuntimeError(f"Unsafe output directory: {output_dir}")
+    if output_dir == program_dir:
+        raise RuntimeError("Output directory cannot be the program directory.")
+
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
+def _channel_fallback(channel_id, index=None):
+    if index is not None:
+        number = index + 1
+    elif isinstance(channel_id, int) and channel_id >= 0:
+        number = channel_id + 1
+    else:
+        number = 0
+    return f"NONAME_Channel{number:03d}"
 
 
 def _channel_name(channel, fallback):
@@ -132,7 +171,7 @@ def _channel_name(channel, fallback):
 
 def _pattern_label(pattern, index, used):
     iid = getattr(pattern, "iid", index + 1)
-    name = _display_name(getattr(pattern, "name", None), f"Pattern_{iid}")
+    name = _display_name(getattr(pattern, "name", None), f"NONAME{index + 1:03d}")
     label = name
     suffix = 2
     while label.lower() in used:
@@ -152,10 +191,10 @@ def create_channel_map(project):
         for i, ch in enumerate(project.channels):
             try:
                 cid = getattr(ch, "iid", getattr(ch, "id", i))
-                cname = _channel_name(ch, f"Track{i + 1}")
+                cname = _channel_name(ch, _channel_fallback(cid, i))
                 cmap[cid] = cname
             except Exception:
-                cmap[i] = f"Track{i + 1}"
+                cmap[i] = _channel_fallback(i, i)
     except Exception as e:
         print(f"Channel map failed: {e}")
     return cmap
@@ -192,7 +231,7 @@ def _consume_pattern_notes(project, channel_map):
                     getattr(note, "rack_channel", getattr(note, "channel", -1)), -1
                 )
                 velocity = _safe_int(getattr(note, "velocity", 100), 100)
-                ch_name = channel_map.get(ch, f"Track{ch + 1}")
+                ch_name = channel_map.get(ch, _channel_fallback(ch))
                 notes_out.append((pos, key, dur, velocity, ch, ch_name))
             except Exception as e:
                 print(f"  Skip bad note: {e}")
@@ -254,14 +293,12 @@ def parse_playlist(project, pattern_labels_by_iid):
 # Text export
 # ---------------------------------------------------------------------------
 
-def export_results(flp_path, raw_patterns, tempo, ppq):
+def export_results(output_dir, flp_path, raw_patterns, tempo, ppq):
     if not raw_patterns:
         print("No notes found, skip text export.")
-        return
+        return 0
 
-    base = os.path.splitext(os.path.basename(flp_path))[0]
-
-    all_path = f"{base}_all_notes.txt"
+    all_path = os.path.join(output_dir, "all_notes.txt")
     with open(all_path, "w", encoding="utf-8") as f:
         f.write(f"# FL Studio Note Extraction Tool {VERSION}\n")
         f.write(f"# File: {os.path.basename(flp_path)}\n")
@@ -279,11 +316,11 @@ def export_results(flp_path, raw_patterns, tempo, ppq):
 
     print(f"[OK] All notes -> {all_path}")
 
-    pdir = f"{base}_patterns"
+    pdir = os.path.join(output_dir, "texts", "patterns")
     os.makedirs(pdir, exist_ok=True)
-    used_files = set()
-    for pname, notes in raw_patterns.items():
-        safe = _unique_stem(pname, used_files, "Pattern")
+    count = 0
+    for index, (pname, notes) in enumerate(raw_patterns.items(), start=1):
+        safe = _indexed_stem(index, pname, f"NONAME{index:03d}")
         pp = os.path.join(pdir, f"{safe}.txt")
         with open(pp, "w", encoding="utf-8") as f:
             f.write(f"# Pattern: {pname}\n")
@@ -293,13 +330,16 @@ def export_results(flp_path, raw_patterns, tempo, ppq):
                 pn = get_pitch_name(key)
                 f.write(f"[{s}-{e},{pn},{ch_name}] dur={dur}ticks vel={velocity}\n")
         print(f"[OK] Pattern {pname} -> {pp}")
+        count += 1
+    return count
 
 
-def export_track_sequences(flp_path, track_seqs, ppq):
+def export_track_sequences(output_dir, flp_path, track_seqs, ppq):
     if not track_seqs:
-        return
-    base = os.path.splitext(os.path.basename(flp_path))[0]
-    path = f"{base}_track_sequences.txt"
+        return 0
+    texts_dir = os.path.join(output_dir, "texts")
+    os.makedirs(texts_dir, exist_ok=True)
+    path = os.path.join(texts_dir, "track_sequences.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"# FL Studio Track Sequence Analysis {VERSION}\n")
         f.write(f"# File: {os.path.basename(flp_path)}\n")
@@ -312,6 +352,7 @@ def export_track_sequences(flp_path, track_seqs, ppq):
                 f.write(f"[{s}-{e}] {ev['pattern_name']} (dur={ev['length']}ticks)\n")
             f.write("\n")
     print(f"[OK] Track sequences -> {path}")
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -400,79 +441,214 @@ def _write_midi_track(mid, ch_id, ch_name, notes, ppq, tempo, midi_channel):
     mid.tracks.append(track)
 
 
-def export_pattern_midi(raw_patterns, tempo, ppq, flp_path):
-    """One .mid per pattern."""
+def _group_notes_by_channel(notes):
+    groups = {}
+    order = []
+    for pos, key, dur, velocity, ch_id, ch_name in notes:
+        if ch_id not in groups:
+            groups[ch_id] = {"name": ch_name, "notes": []}
+            order.append(ch_id)
+        groups[ch_id]["notes"].append((pos, key, dur, velocity))
+    try:
+        ordered_ids = sorted(order)
+    except TypeError:
+        ordered_ids = order
+    return OrderedDict((ch_id, groups[ch_id]) for ch_id in ordered_ids)
+
+
+def _write_instrument_midi(path, ch_name, notes, tempo, ppq):
     from mido import MidiFile, MidiTrack, MetaMessage
 
-    base = os.path.splitext(os.path.basename(flp_path))[0]
-    mdir = f"{base}_midi_patterns"
-    os.makedirs(mdir, exist_ok=True)
-    used_files = set()
+    mid = MidiFile(ticks_per_beat=ppq)
+    t0 = MidiTrack()
+    mid.tracks.append(t0)
+    t0.append(MetaMessage("set_tempo", tempo=_tempo_to_mido(tempo), time=0))
+    _write_midi_track(mid, 0, ch_name, notes, ppq, tempo, 0)
+    mid.save(path)
 
-    for pname, notes in raw_patterns.items():
+
+def export_pattern_midis(output_dir, raw_patterns, tempo, ppq):
+    """Export one folder per pattern and one MIDI per active channel."""
+    patterns_dir = os.path.join(output_dir, "patterns")
+    os.makedirs(patterns_dir, exist_ok=True)
+
+    midi_count = 0
+    empty_patterns = []
+    for p_index, (pname, notes) in enumerate(raw_patterns.items(), start=1):
+        pdir_name = _indexed_stem(p_index, pname, f"NONAME{p_index:03d}")
+        pdir = os.path.join(patterns_dir, pdir_name)
+        os.makedirs(pdir, exist_ok=True)
+
         if not notes:
+            empty_patterns.append(pdir_name)
+            marker = os.path.join(pdir, "_EMPTY.txt")
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("This pattern contains no readable note data.\n")
+                f.write("It may be empty, plugin-dependent, or unsupported by PyFLP.\n")
+            print(f"[OK] Empty Pattern {pname} -> {pdir}")
             continue
-        mid = MidiFile(ticks_per_beat=ppq)
-        t0 = MidiTrack()
-        mid.tracks.append(t0)
-        t0.append(MetaMessage("set_tempo", tempo=_tempo_to_mido(tempo), time=0))
 
-        ch_groups = OrderedDict()
-        for pos, key, dur, velocity, ch_id, ch_name in notes:
-            if ch_id not in ch_groups:
-                ch_groups[ch_id] = {"name": ch_name, "notes": []}
-            ch_groups[ch_id]["notes"].append((pos, key, dur, velocity))
+        groups = _group_notes_by_channel(notes)
+        for c_index, (ch_id, ch_data) in enumerate(groups.items(), start=1):
+            cname = ch_data["name"]
+            filename = _indexed_stem(
+                c_index,
+                cname,
+                _channel_fallback(ch_id),
+            )
+            mpath = os.path.join(pdir, f"{filename}.mid")
+            _write_instrument_midi(mpath, cname, ch_data["notes"], tempo, ppq)
+            midi_count += 1
+            print(f"[OK] Pattern MIDI {pname} / {cname} -> {mpath}")
 
-        for idx, (ch_id, ch_data) in enumerate(ch_groups.items()):
-            _write_midi_track(mid, ch_id, ch_data["name"], ch_data["notes"], ppq, tempo, idx % 16)
-
-        safe = _unique_stem(pname, used_files, "Pattern")
-        mpath = os.path.join(mdir, f"{safe}.mid")
-        mid.save(mpath)
-        print(f"[OK] Pattern MIDI {pname} -> {mpath}")
+    return {"midi_count": midi_count, "empty_patterns": empty_patterns}
 
 
-def export_track_midi(raw_patterns, track_seqs, tempo, ppq, flp_path):
-    """One .mid per track -- merge all patterns on that track by timeline."""
-    if not track_seqs:
-        return
-    from mido import MidiFile, MidiTrack, MetaMessage
+def export_track_midis(output_dir, raw_patterns, track_seqs, tempo, ppq):
+    """Export one folder per Playlist Track and one MIDI per active channel."""
+    tracks_dir = os.path.join(output_dir, "tracks")
+    os.makedirs(tracks_dir, exist_ok=True)
 
-    base = os.path.splitext(os.path.basename(flp_path))[0]
-    mdir = f"{base}_midi_tracks"
-    os.makedirs(mdir, exist_ok=True)
-    used_files = set()
+    pnotes = {pname: notes for pname, notes in raw_patterns.items()}
+    midi_count = 0
+    skipped_tracks = []
 
-    # name -> notes index
-    pnotes = {}
-    for pname, notes in raw_patterns.items():
-        pnotes[pname] = notes
-
-    for tid, td in sorted(track_seqs.items(), key=lambda x: x[0]):
-        mid = MidiFile(ticks_per_beat=ppq)
-        t0 = MidiTrack()
-        mid.tracks.append(t0)
-        t0.append(MetaMessage("set_tempo", tempo=_tempo_to_mido(tempo), time=0))
-
-        ch_all = OrderedDict()
+    for t_index, (tid, td) in enumerate(
+        sorted(track_seqs.items(), key=lambda x: x[0]),
+        start=1,
+    ):
+        track_notes = []
         for ev in td["events"]:
             pn = ev["pattern_name"]
             offset = ev["start"]
             if pn in pnotes:
                 for pos, key, dur, velocity, ch_id, ch_name in pnotes[pn]:
-                    if ch_id not in ch_all:
-                        ch_all[ch_id] = {"name": ch_name, "notes": []}
-                    ch_all[ch_id]["notes"].append((pos + offset, key, dur, velocity))
+                    track_notes.append((pos + offset, key, dur, velocity, ch_id, ch_name))
 
-        for idx, (ch_id, ch_data) in enumerate(ch_all.items()):
-            _write_midi_track(
-                mid, ch_id, ch_data["name"], ch_data["notes"], ppq, tempo, idx % 16
+        ch_all = _group_notes_by_channel(track_notes)
+        if not ch_all:
+            skipped_tracks.append(td["name"])
+            continue
+
+        tdir_name = _indexed_stem(t_index, td["name"], f"Track{tid}")
+        tdir = os.path.join(tracks_dir, tdir_name)
+        os.makedirs(tdir, exist_ok=True)
+
+        for c_index, (ch_id, ch_data) in enumerate(ch_all.items(), start=1):
+            cname = ch_data["name"]
+            filename = _indexed_stem(
+                c_index,
+                cname,
+                _channel_fallback(ch_id),
             )
+            mpath = os.path.join(tdir, f"{filename}.mid")
+            _write_instrument_midi(mpath, cname, ch_data["notes"], tempo, ppq)
+            midi_count += 1
+            print(f"[OK] Track MIDI {td['name']} / {cname} -> {mpath}")
 
-        safe = _unique_stem(td["name"], used_files, f"Track{tid}")
-        mpath = os.path.join(mdir, f"{safe}.mid")
-        mid.save(mpath)
-        print(f"[OK] Track MIDI {td['name']} -> {mpath}")
+    return {"midi_count": midi_count, "skipped_tracks": skipped_tracks}
+
+
+def export_summary(
+    output_dir,
+    flp_path,
+    tempo,
+    ppq,
+    raw_patterns,
+    total_notes,
+    track_seqs,
+    text_stats,
+    pattern_stats,
+    track_stats,
+):
+    path = os.path.join(output_dir, "summary.txt")
+    channel_names = OrderedDict()
+    for notes in raw_patterns.values():
+        for pos, key, dur, velocity, ch_id, ch_name in notes:
+            channel_names[ch_id] = ch_name
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"FlpInfoer {VERSION} Export Summary\n")
+        f.write("=" * 40 + "\n\n")
+        f.write(f"File: {os.path.basename(flp_path)}\n")
+        f.write(f"Output: {output_dir}\n")
+        f.write(f"Tempo: {tempo} BPM\n")
+        f.write(f"PPQ: {ppq}\n\n")
+
+        f.write("Counts\n")
+        f.write("-" * 20 + "\n")
+        f.write(f"Patterns: {len(raw_patterns)}\n")
+        f.write(f"Playlist tracks with pattern clips: {len(track_seqs)}\n")
+        f.write(f"Readable notes: {total_notes}\n")
+        f.write(f"Active channels in notes: {len(channel_names)}\n")
+        f.write(f"Pattern MIDI files: {pattern_stats['midi_count']}\n")
+        f.write(f"Track MIDI files: {track_stats['midi_count']}\n")
+        f.write(f"Pattern text files: {text_stats['pattern_text_count']}\n\n")
+
+        f.write("Channels\n")
+        f.write("-" * 20 + "\n")
+        if channel_names:
+            for index, ch_id in enumerate(sorted(channel_names), start=1):
+                name = channel_names[ch_id]
+                f.write(f"{index:03d}. id={ch_id} name={name}\n")
+        else:
+            f.write("(none)\n")
+        f.write("\n")
+
+        f.write("Empty Patterns\n")
+        f.write("-" * 20 + "\n")
+        if pattern_stats["empty_patterns"]:
+            for name in pattern_stats["empty_patterns"]:
+                f.write(f"- {name}\n")
+        else:
+            f.write("(none)\n")
+        f.write("\n")
+
+        f.write("Skipped Playlist Tracks\n")
+        f.write("-" * 20 + "\n")
+        if track_stats["skipped_tracks"]:
+            for name in track_stats["skipped_tracks"]:
+                f.write(f"- {name}\n")
+        else:
+            f.write("(none)\n")
+        f.write("\n")
+
+        f.write("Notes\n")
+        f.write("-" * 20 + "\n")
+        f.write("V0.4 exports notes, tempo, velocity, Pattern positions, and names.\n")
+        f.write("Muted clips/channels, clip offsets, and advanced edge cases are planned for V0.5.\n")
+
+    print(f"[OK] Summary -> {path}")
+    return path
+
+
+def export_project(flp_path, raw_patterns, tempo, ppq, total_notes, track_seqs):
+    output_dir = _prepare_output_dir(flp_path)
+    print(f"\nOutput folder: {output_dir}")
+
+    text_count = export_results(output_dir, flp_path, raw_patterns, tempo, ppq)
+    export_track_sequences(output_dir, flp_path, track_seqs, ppq)
+
+    print("\n--- Pattern Instrument MIDI ---")
+    pattern_stats = export_pattern_midis(output_dir, raw_patterns, tempo, ppq)
+
+    print("\n--- Playlist Track Instrument MIDI ---")
+    track_stats = export_track_midis(output_dir, raw_patterns, track_seqs, tempo, ppq)
+
+    text_stats = {"pattern_text_count": text_count}
+    export_summary(
+        output_dir,
+        flp_path,
+        tempo,
+        ppq,
+        raw_patterns,
+        total_notes,
+        track_seqs,
+        text_stats,
+        pattern_stats,
+        track_stats,
+    )
+    return output_dir
 
 
 # ---------------------------------------------------------------------------
@@ -505,33 +681,23 @@ def extract_flp_notes(flp_path):
         )
         print(f"Found {total} notes in {len(raw_patterns)} pattern(s)")
 
-        # Text export
-        print("\n--- Text Export ---")
-        export_results(flp_path, raw_patterns, tempo, ppq)
-
-        # Playlist
         print("\n--- Playlist ---")
         track_seqs = parse_playlist(project, pattern_labels_by_iid)
-        if track_seqs:
-            export_track_sequences(flp_path, track_seqs, ppq)
 
-        # MIDI export
-        print("\n--- MIDI Export ---")
-        print("Pattern MIDI...")
-        export_pattern_midi(raw_patterns, tempo, ppq, flp_path)
-
-        if track_seqs:
-            print("Track MIDI...")
-            export_track_midi(raw_patterns, track_seqs, tempo, ppq, flp_path)
+        print("\n--- Export ---")
+        export_project(flp_path, raw_patterns, tempo, ppq, total, track_seqs)
 
         print(f"\n{'=' * 50}")
         print("All done!")
+        ok = True
 
     except Exception as e:
         print(f"\nError: {e}")
         traceback.print_exc()
+        ok = False
 
     print(f"Time: {time.time() - t0:.2f}s")
+    return ok
 
 
 def main():
@@ -568,13 +734,13 @@ def main():
     if not flp_path.lower().endswith(".flp"):
         print(f"\nWarning: not a .flp file: {flp_path}")
 
-    extract_flp_notes(flp_path)
+    ok = extract_flp_notes(flp_path)
     print("\nPress Enter to exit...")
     try:
         input()
     except (EOFError, OSError):
         pass
-    return 0
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

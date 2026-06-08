@@ -64,8 +64,10 @@ For the current sample project, confirm:
 - tempo is `130`
 - total note count is `47`
 - Playlist pattern item count is `6`
-- Pattern `1.mid` exports note `60` for the drum channels
-- Pattern `2.mid` exports notes `53`, `55`, `57`, and `59`
+- `测试/patterns/001 - 1/` exports four drum MIDI files
+- `测试/patterns/002 - 2/001 - Purple Lullaby.mid` exports notes `53`, `55`, `57`, and `59`
+- `测试/tracks/001 - Track1/001 - 808 Kick.mid` exports `16` notes
+- `测试/tracks/002 - Track2/001 - Purple Lullaby.mid` exports `38` notes
 
 ## Release Flow
 

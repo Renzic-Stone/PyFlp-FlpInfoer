@@ -9,8 +9,8 @@ FlpInfoer 是一个基于 Python 3.10、[PyFLP](https://github.com/demberto/PyFL
 1. 导出所有音符，并按 Pattern 分组
 2. 按 Pattern 分文件导出文本音符
 3. 导出速度 BPM 和 PPQ
-4. 按 Pattern 分别导出 `.mid`
-5. 按 Playlist Track 导出完整时间线 `.mid`，并在 MIDI 内按乐器名分轨
+4. 按 Pattern 建文件夹，并按实际有音符的乐器分别导出 `.mid`
+5. 按 Playlist Track 建文件夹，并按该轨道时间线拼接后按乐器分别导出 `.mid`
 6. 导出播放列表轨道上的 Pattern 序列
 7. 保留 PyFLP 读取到的 note velocity
 8. 保持实际 MIDI 音高听感，不追求跨 DAW 的八度显示名一致
@@ -30,17 +30,28 @@ py -3.10 FlpInfoer.py "你的工程.flp"
 也可以运行脚本后把 `.flp` 路径拖入窗口。
 
 ## 当前输出
-以 `Song.flp` 为例，当前版本会在运行目录生成：
+以 `Song.flp` 为例，当前版本会在程序所在目录生成：
 
 ```text
-Song_all_notes.txt
-Song_patterns/
-Song_track_sequences.txt
-Song_midi_patterns/
-Song_midi_tracks/
+Song/
+  all_notes.txt
+  summary.txt
+  texts/
+    track_sequences.txt
+    patterns/
+      001 - PatternName.txt
+      002 - NONAME002.txt
+  patterns/
+    001 - PatternName/
+      001 - InstrumentName.mid
+    002 - NONAME002/
+      _EMPTY.txt
+  tracks/
+    001 - Track1/
+      001 - InstrumentName.mid
 ```
 
-后续版本计划改进为更适合迁移和整理的目录结构，例如按 Pattern 文件夹和 Playlist Track 文件夹继续拆分到每个生效乐器。
+如果同名输出目录已存在，FlpInfoer 会删除旧目录并重新生成。无名 Pattern 会使用 `NONAME001` 这类名称；无名 Channel 会使用 `NONAME_Channel001` 这类名称。空 Pattern 会保留文件夹并写入 `_EMPTY.txt`，空 Channel 和空 Playlist Track 不生成文件。
 
 ## 格式与位置
 文本音符格式：
@@ -58,7 +69,7 @@ MIDI 文件只保存 note number，不保存 `C4` / `C5` 这类显示名。不�
 FlpInfoer 默认以听感和可回收性为准：保留 FL Studio / PyFLP 中的实际音高，不为了让其他 DAW 显示相同的八度名而自动移调。
 
 ## 边界
-本工具目前只提取 MIDI 相关信息，例如音符、速度、Pattern、Playlist Track 中的 Pattern 位置和乐器名。它不会导出或还原插件音色、混音台效果、音频、自动化或工程里的完整播放状态。
+本工具目前只提取 MIDI 相关信息，例如音符、速度、Pattern、Playlist Track 中的 Pattern 位置和乐器名。它不会导出或还原插件音色、混音台效果、音频、自动化或工程里的完整播放状态。Muted、clip 裁剪、clip offset 等复杂状态计划在 V0.5 处理。
 
 > 注意：本项目与 [FL Studio](https://www.image-line.com/fl-studio/) 和 [FlpInfo](https://github.com/demberto/FLPInfo) 无关。后者同样依赖 PyFLP，但已停止更新。
 

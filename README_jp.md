@@ -9,8 +9,8 @@ FlpInfoer は、Python 3.10、[PyFLP](https://github.com/demberto/PyFLP) v2.2.1�
 1. 全ノートを Pattern ごとにグループ化して出力
 2. Pattern 別のテキストノート出力
 3. BPM と PPQ の出力
-4. Pattern 別 `.mid` 出力
-5. Playlist Track ごとのタイムライン `.mid` 出力（MIDI 内で楽器名付きトラック分け）
+4. Pattern ごとにフォルダを作成し、実際にノートがある楽器ごとに `.mid` を出力
+5. Playlist Track ごとにフォルダを作成し、タイムライン上の Pattern を結合して楽器ごとに `.mid` を出力
 6. Playlist Track 上の Pattern シーケンス出力
 7. PyFLP から読み取った note velocity の保持
 8. DAW 間のオクターブ表示名ではなく、実際の再生音高を保持
@@ -30,17 +30,28 @@ py -3.10 FlpInfoer.py "your project.flp"
 スクリプトを起動して、コンソールウィンドウへ `.flp` のパスをドラッグすることもできます。
 
 ## 現在の出力
-`Song.flp` の場合、現在のバージョンは以下を生成します。
+`Song.flp` の場合、現在のバージョンはプログラムと同じ場所に以下のフォルダを生成します。
 
 ```text
-Song_all_notes.txt
-Song_patterns/
-Song_track_sequences.txt
-Song_midi_patterns/
-Song_midi_tracks/
+Song/
+  all_notes.txt
+  summary.txt
+  texts/
+    track_sequences.txt
+    patterns/
+      001 - PatternName.txt
+      002 - NONAME002.txt
+  patterns/
+    001 - PatternName/
+      001 - InstrumentName.mid
+    002 - NONAME002/
+      _EMPTY.txt
+  tracks/
+    001 - Track1/
+      001 - InstrumentName.mid
 ```
 
-将来のバージョンでは、Pattern と Playlist Track の出力を有効な楽器ごとにさらに分割する、移行向けのフォルダ構成を予定しています。
+同名の出力フォルダが既に存在する場合、FlpInfoer は古いフォルダを削除して再生成します。名前のない Pattern は `NONAME001` のような名前になり、名前のない Channel は `NONAME_Channel001` のような名前になります。空の Pattern は `_EMPTY.txt` 付きのフォルダとして保持し、空の Channel と空の Playlist Track は生成しません。
 
 ## フォーマットと位置
 テキストノート形式:
@@ -58,7 +69,7 @@ MIDI ファイルは note number を保存し、`C4` / `C5` のような表示�
 FlpInfoer はデフォルトで FL Studio / PyFLP 上の実際の再生音高を保持します。他の DAW で同じオクターブ名を表示させるための自動移調は行いません。
 
 ## 範囲
-FlpInfoer が現在抽出するのは、ノート、テンポ、Pattern、Playlist Track 上の Pattern 位置、楽器名などの MIDI 関連情報です。プラグイン音色、ミキサーエフェクト、音声、オートメーション、プロジェクト全体の再生状態は出力・再現しません。
+FlpInfoer が現在抽出するのは、ノート、テンポ、Pattern、Playlist Track 上の Pattern 位置、楽器名などの MIDI 関連情報です。プラグイン音色、ミキサーエフェクト、音声、オートメーション、プロジェクト全体の再生状態は出力・再現しません。Muted、clip trimming、clip offset などの複雑な状態は V0.5 で対応予定です。
 
 > 注意: このプロジェクトは [FL Studio](https://www.image-line.com/fl-studio/) および [FlpInfo](https://github.com/demberto/FLPInfo) とは無関係です。FlpInfo も PyFLP に依存していますが、現在は保守されていません。
 
